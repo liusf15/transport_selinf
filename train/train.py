@@ -8,7 +8,7 @@ def train(model, params, samples, contexts, learning_rate=0.01, max_iter=500):
 
     @jax.jit
     def loss_fn(params):
-        return model.apply(params, samples, method=model.forward_kl)
+        return model.apply(params, samples, context=contexts, method=model.forward_kl)
     
     @jax.jit
     def train_step(carry, _):
