@@ -11,6 +11,7 @@ class PolynomialSelection(Selector):
         self.sigma = sigma
 
         self.selected_deg, self.selected_model = self.select(df)
+        self.d = self.selected_deg
         self.X_E = np.array(df.iloc[:, :self.selected_deg+1])
         self.beta_hat = np.array(self.selected_model.params.iloc[1:])
         self.Sigma = np.linalg.inv(self.X_E.T @ self.X_E) * sigma**2

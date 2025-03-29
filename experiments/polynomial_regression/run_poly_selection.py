@@ -83,26 +83,9 @@ def run(seed, n_train, resample_scale, max_iter):
 
 
     print("Generating samples ...")
-    def generate_one_sample(seed):
-        _rng = np.random.default_rng(seed)
-        beta_null = Sigma_sqrt @ _rng.standard_normal(d) * resample_scale + selector.beta_hat
-        X = selector.resample(_rng, beta_null, num_samples=1, max_try=100)
-        if len(X) > 0:
-            return X[0], beta_null
-        return None, None
-    
-    start = time.time()
     rng = np.random.default_rng(0)
-    seeds = rng.integers(low=0, high=2**32 - 1, size=n_train)
-    results = Parallel(n_jobs=-1)(
-            delayed(generate_one_sample)(seed)
-            for seed in tqdm(seeds)
-        )
-    end = time.time()
-
-    samples = np.array([r[0] for r in results if r[0] is not None])
-    contexts = np.array([r[1] for r in results if r[0] is not None])
-    print("Generated", samples.shape[0], 'samples after', end - start, 'seconds')
+    samples, contexts = selector.generate_training_data(rng, n_train, resample_scale=resample_scale, max_try=100)
+    print("Generated", samples.shape[0], 'samples after')
 
     mean_shift = np.mean(samples, axis=0)
     cov_chol = np.linalg.cholesky(np.linalg.inv(np.atleast_2d(np.cov(samples.T))))
@@ -182,7 +165,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_train', type=int, default=1000)
     parser.add_argument('--resample_scale', default=1., type=float)
     parser.add_argument('--max_iter', type=int, default=1000)
-    parser.add_argument('--rootdir', type=str, default='/mnt/ceph/users/sliu1/selinf_nf/')
+    parser.add_argument('--rootdir', type=str, default='/mnt/ceph/users/sliu1/transport_selinf/')
     args = parser.parse_args()
 
     n = args.n
