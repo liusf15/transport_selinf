@@ -66,7 +66,7 @@ def run(seed, n_train, resample_scale, max_iter):
     selector = PolynomialSelection(df, sigma)
     d = selector.selected_deg
     print('selected degree:', d)
-    if d <= 1:
+    if d < 1:
         return
     
     beta_target = (np.linalg.pinv(X[:, :d+1]) @ mu)[1:]
