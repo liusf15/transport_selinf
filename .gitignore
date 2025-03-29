@@ -172,3 +172,12 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+################################
+.venv_transport/
+results/
+env.sh
+.vscode/
+selective-inference/
+regreg/
+scripts/
