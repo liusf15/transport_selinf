@@ -3,19 +3,15 @@ import argparse
 import os
 import pickle
 from jax.scipy.stats import multivariate_normal as mvn
-import time
 import jax
 import jax.numpy as jnp 
-from tqdm import tqdm
-from joblib import Parallel, delayed
 from scipy.special import logsumexp
-from selectinf.randomized.lasso import lasso
-from selectinf.base import selected_targets
 
 from experiments.lasso.randomized_lasso import RandomLassoCV
 from experiments.lasso.regression_designs import gaussian_instance
 from flows.train import train_nf
 from utils.utils import ci_bisection
+
 
 def inference(logdensity_fn, select_prob_fn, beta_hat, Sigma, compute_ci=True, sig_level=0.05):
     d = len(beta_hat)
@@ -60,8 +56,8 @@ def run(seed, signal_fac, nu, n_train, max_iter, savepath=None):
     p = 5
     s = 0
     sigma = 1.
-    rho = 0.5
-    signal_fac = 1.5
+    rho = 0.9
+    signal_fac = signal_fac
     signal = np.sqrt(signal_fac * 2 * np.log(p))
     equi = False
     random_signs = False
@@ -157,7 +153,7 @@ def run(seed, signal_fac, nu, n_train, max_iter, savepath=None):
         elif adjust == 'preselect':
             return preselect_logdensity
         else:
-            raise ValueError(f"Invalid method {method}")
+            raise ValueError(f"Invalid method {adjust}")
     
     def get_select_prob_fn(method):
         if method == 'biv':
@@ -171,11 +167,14 @@ def run(seed, signal_fac, nu, n_train, max_iter, savepath=None):
     
     for adjust in ['adjusted', 'preselect']:
         logdensity_fn = get_logdensity_fn(adjust)
-        for method in ['sov']:
-            select_prob_fn = get_select_prob_fn(method)
-            pvalues = inference(logdensity_fn, select_prob_fn, rl.beta_hat, rl.Sigma, compute_ci=False, sig_level=sig_level)
-            # intervals_all[adjust + '_' + method] = ci
-            pvalues_all[adjust + '_' + method] = pvalues
+        # for method in ['sov']:
+        if nu > 0:
+            select_prob_fn = rl.select_prob_sov
+        else:
+            select_prob_fn = rl.select_prob_hard_threshold
+        pvalues = inference(logdensity_fn, select_prob_fn, rl.beta_hat, rl.Sigma, compute_ci=False, sig_level=sig_level)
+        # intervals_all[adjust + '_' + method] = ci
+        pvalues_all[adjust] = pvalues
 
     # pvalues_biv, ci_biv = inference(logdensity_fn, rl.select_prob_bivnormal, rl.beta_hat, rl.Sigma, sig_level)
     # pvalues_hardthre, ci_hardthre = inference(logdensity_fn, rl.select_prob_hard_threshold, rl.beta_hat, rl.Sigma, sig_level)
@@ -192,7 +191,7 @@ def run(seed, signal_fac, nu, n_train, max_iter, savepath=None):
     
     results_all = {'pvalues': pvalues_all}
     if savepath is not None:
-        prefix = f'cv_rlasso_sov_{n}_{p}_{s}_{nu}_{signal_fac}_train_{n_train}_iter_{max_iter}'
+        prefix = f'lassocv_{n}_{p}_{s}_{nu}_{signal_fac}_train_{n_train}_iter_{max_iter}'
         path = os.path.join(savepath, prefix)
         os.makedirs(path, exist_ok=True)
         filename = os.path.join(path, f'{seed}.pkl')
@@ -211,6 +210,6 @@ if __name__ == '__main__':
     parser.add_argument('--rootdir', type=str, default='/mnt/ceph/users/sliu1/transport_selinf/')
     args = parser.parse_args()
 
-    savepath = os.path.join(args.rootdir, args.date, 'cv_rlasso')
+    savepath = os.path.join(args.rootdir, args.date, 'lassocv')
 
     run(seed=args.seed, signal_fac=args.signal_fac, nu=args.nu, n_train=args.n_train, max_iter=args.max_iter, savepath=savepath)

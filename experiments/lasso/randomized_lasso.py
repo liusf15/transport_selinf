@@ -35,6 +35,8 @@ class RandomLasso(Selector):
         self.nu = nu
         if w is None:
             self.w = np.zeros(self.p)
+        else:
+            self.w = w
 
         self.beta_sol = self.solve_lasso(y, w, self.lbd)
         E = abs(self.beta_sol) > 1e-10
@@ -52,10 +54,13 @@ class RandomLasso(Selector):
         self.K_E[:, np.logical_not(E)] = -np.eye(self.p - self.d)
         self.KX = self.K_E @ X.T
         self.u_obs = self.KX @ y
-        self.wperp_obs = self.K_E @ w
+        # self.wperp_obs = self.K_E @ w
         self.proj_y = self.KX.T @ np.linalg.inv(self.KX @ self.KX.T)
-        Omega = self.nu**2 * X.T @ X
-        self.proj_w = Omega @ self.K_E.T @ np.linalg.inv(self.K_E @ Omega @ self.K_E.T)
+        # Omega = self.nu**2 * X.T @ X
+        # if self.nu > 0:
+        #     self.proj_w = Omega @ self.K_E.T @ np.linalg.inv(self.K_E @ Omega @ self.K_E.T)
+        # else:
+        #     self.proj_w = None
 
     def solve_lasso(self, y, w, lbd=None):
         if lbd is None:
