@@ -216,7 +216,7 @@ class RandomLasso(Selector):
         return pvals, np.stack([lower, upper]).T
     
 class RandomLassoCV(RandomLasso):
-    def __init__(self, X, y, sigma, alphas, nu=0., w=None):
+    def __init__(self, X, y, sigma, alphas, nfold=10, nu=0., w=None):
 
         
         self.X = X
@@ -224,6 +224,7 @@ class RandomLassoCV(RandomLasso):
         self.n, self.p = X.shape
         self.sigma = sigma
         self.alphas = alphas
+        self.nfold = nfold
 
         self.nu = nu
         if w is None:
@@ -255,7 +256,7 @@ class RandomLassoCV(RandomLasso):
         # self.proj_w = Omega @ self.K_E.T @ np.linalg.inv(self.K_E @ Omega @ self.K_E.T)
     
     def select_lambda(self, y):
-        lasso_cv = LassoCV(alphas=self.alphas, fit_intercept=False, n_jobs=-1, random_state=0)
+        lasso_cv = LassoCV(alphas=self.alphas, fit_intercept=False, n_jobs=-1, cv=self.nfold, random_state=0)
         lasso_cv.fit(self.X, y)
         return lasso_cv.alpha_ 
 
