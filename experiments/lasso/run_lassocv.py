@@ -98,15 +98,21 @@ def run(seed, signal_fac, nu, n_train, max_iter, savepath=None):
     samples_center = (samples - mean_shift) @ cov_chol
 
     if d == 1:
-        model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-1, max_iter=max_iter, hidden_dims=[8], num_bins=20)
-        if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(np.abs(losses[-100:])) > 0.1:
-            print("Unstable training, try learning rate 1e-2")
-            model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-2, max_iter=max_iter, hidden_dims=[8], num_bins=20)
+        model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-2, max_iter=max_iter, hidden_dims=[8], num_bins=20)
+        if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(np.abs(losses[-100:])) > 0.01:
+            print("Unstable training, try learning rate 1e-3")
+            model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-3, max_iter=max_iter, hidden_dims=[8], num_bins=20)
+            if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(np.abs(losses[-100:])) > 0.01:
+                print("Unstable training, try learning rate 1e-4")
+                model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[8], num_bins=20)
     else:
-        model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-3, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
-        if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(np.abs(losses[-100:])) > 0.1:
-            print("Unstable training, try learning rate 1e-4")
-            model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
+        model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-2, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
+        if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(np.abs(losses[-100:])) > 0.01:
+            print("Unstable training, try learning rate 1e-3")
+            model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-3, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
+            if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(np.abs(losses[-100:])) > 0.01:
+                print("Unstable training, try learning rate 1e-4")
+                model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
     
     @jax.jit
     def adjusted_logdensity_fn(beta_hat, beta_null):
