@@ -17,7 +17,8 @@ class ConditionerMLP(nn.Module):
             x = self.activation(nn.Dense(h)(x))
         x = nn.Dense(
             2 * self.output_dim,
-            kernel_init=nn.initializers.zeros_init(),
+            # kernel_init=nn.initializers.zeros_init(),
+            kernel_init=nn.initializers.variance_scaling(scale=0.01, mode="fan_in", distribution="truncated_normal"),
             bias_init=nn.initializers.zeros_init())(x)
         return x
 

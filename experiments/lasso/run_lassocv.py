@@ -55,7 +55,6 @@ def run(seed, signal_fac, nu, rho, n_train, max_iter, savepath=None):
     p = 5
     s = 0
     sigma = 1.
-    rho = 0.9
     signal = np.sqrt(signal_fac * 2 * np.log(p))
     equi = False
     random_signs = False
@@ -82,8 +81,10 @@ def run(seed, signal_fac, nu, rho, n_train, max_iter, savepath=None):
     pvalues_all['mle'] = np.array(result_mle['pvalue'])
     pvalues_all['naive'], intervals_all['naive'] = rl.naive_inference(sig_level=sig_level)
 
-    def preselect_logdensity(beta_hat, beta_null):
-        return mvn.logpdf(beta_hat, mean=beta_null, cov=rl.Sigma)
+    def neg_loglik(beta_hat, beta_null):
+        return -mvn.logpdf(beta_hat, mean=beta_null, cov=rl.Sigma)
+    
+    pvalues_all['preselect'] = rl.adjusted_inference(neg_loglik, compute_ci=False, sig_level=sig_level)
 
     print("Generating samples ...")
     samples, contexts = rl.generate_training_data(rng, n_train, resample_scale=1., max_try=100)
@@ -97,35 +98,22 @@ def run(seed, signal_fac, nu, rho, n_train, max_iter, savepath=None):
     cov_chol = np.linalg.cholesky(np.linalg.inv(np.atleast_2d(np.cov(samples.T))))
     samples_center = (samples - mean_shift) @ cov_chol
 
-    if d == 1:
-        model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-2, max_iter=max_iter, hidden_dims=[8], num_bins=20)
-        if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(np.abs(losses[-100:])) > 0.01:
-            print("Unstable training, try learning rate 1e-3")
-            model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-3, max_iter=max_iter, hidden_dims=[8], num_bins=20)
-            if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(np.abs(losses[-100:])) > 0.01:
-                print("Unstable training, try learning rate 1e-4")
-                model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[8], num_bins=20)
-    else:
-        model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-2, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
-        if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(np.abs(losses[-100:])) > 0.01:
-            print("Unstable training, try learning rate 1e-3")
-            model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-3, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
-            if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(np.abs(losses[-100:])) > 0.01:
-                print("Unstable training, try learning rate 1e-4")
-                model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
-    
-    @jax.jit
-    def adjusted_logdensity_fn(beta_hat, beta_null):
-        beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
-        return -model.apply(params, beta_hat_center_, beta_null, method=model.forward_kl)
 
-    if nu > 0:
-        select_prob_fn = rl.select_prob_sov
-    else:
-        select_prob_fn = rl.select_prob_hard_threshold
-    
-    pvalues_all['preselect'] = inference(preselect_logdensity, select_prob_fn, rl.beta_hat, rl.Sigma, compute_ci=False, sig_level=sig_level)
-    pvalues_all['adjusted'] = inference(adjusted_logdensity_fn, select_prob_fn, rl.beta_hat, rl.Sigma, compute_ci=False, sig_level=sig_level)
+    model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-3, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
+    losses = np.array(losses)
+    num_increases = np.sum(np.diff(losses[-100:]) > 0.)
+    if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(losses[-100:]) > 0.01 or num_increases > 10:
+        print("Unstable training, try learning rate 1e-4")
+        model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
+        losses = np.array(losses)
+        if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(losses[-100:]) > 0.01 or num_increases > 10:
+            print("Unstable training!!!")
+
+    def neg_loglik_adjusted(beta_hat, beta_null):
+        beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
+        return model.apply(params, beta_hat_center_, beta_null, method=model.forward_kl)
+    pvalues_all['adjusted'] = rl.adjusted_inference(neg_loglik_adjusted, compute_ci=False, sig_level=sig_level)
+
     print(pvalues_all)
 
     false_rejects_all = {}

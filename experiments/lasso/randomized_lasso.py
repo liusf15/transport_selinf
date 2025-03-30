@@ -4,12 +4,16 @@ from scipy.special import ndtri, ndtr
 from sklearn.linear_model import Lasso, LassoCV
 from scipy.stats import multivariate_normal as mvn
 from scipy.stats import norm
+import jax
+import jax.numpy as jnp
+from jax.scipy.special import logsumexp
 
 import regreg.api as rr
 from selectinf.algorithms import lasso
 from selectinf.randomized.lasso import lasso
 from selectinf.base import selected_targets, full_targets
 from sampling.cython_core import sample_sov
+from utils.utils import ci_bisection
 
 from experiments.selector import Selector
 
@@ -48,19 +52,12 @@ class RandomLasso(Selector):
         self.Sigma_sqrt = np.linalg.cholesky(self.Sigma) 
         self.beta_hat = np.linalg.pinv(self.X_E) @ self.y
 
-        # self.K_E = np.hstack([X[:, ~E].T @ X[:, E] @ np.linalg.inv(X[:, E].T @ X[:, E]), -np.eye(self.p - self.d)])
         self.K_E = np.zeros((self.p - self.d, self.p))
         self.K_E[:, E] = (self.X[:, np.logical_not(E)].T @ self.X[:, E]) @ np.linalg.inv(self.X[:, E].T @ self.X[:, E])
         self.K_E[:, np.logical_not(E)] = -np.eye(self.p - self.d)
         self.KX = self.K_E @ X.T
         self.u_obs = self.KX @ y
-        # self.wperp_obs = self.K_E @ w
         self.proj_y = self.KX.T @ np.linalg.inv(self.KX @ self.KX.T)
-        # Omega = self.nu**2 * X.T @ X
-        # if self.nu > 0:
-        #     self.proj_w = Omega @ self.K_E.T @ np.linalg.inv(self.K_E @ Omega @ self.K_E.T)
-        # else:
-        #     self.proj_w = None
 
     def solve_lasso(self, y, w, lbd=None):
         if lbd is None:
@@ -87,21 +84,7 @@ class RandomLasso(Selector):
         # K_E[:, np.logical_not(E)] = -np.eye(self.p - d)
         # assert max(abs(K_E @ self.X.T @ y - K_E @ w - self.lbd * self.X[:, np.logical_not(E)].T @ self.X[:, E] @ np.linalg.inv(self.X[:, E].T @ self.X[:, E]) @ s_E)) <= self.lbd
         return beta_sol
-        
-    # def _resample(self, rng, beta_null):
-    #     y = self.X_E @ beta_null + rng.normal(size=(self.n, )) * self.sigma
-    #     y = y - self.proj_y @ (self.KX @ y - self.u_obs)
-    #     # assert np.allclose(self.KX @ y, self.u_obs)
 
-    #     w = self.nu * self.X.T @ rng.normal(size=(self.n, ))
-    #     w = w - self.proj_w @ (self.K_E @ w - self.wperp_obs)
-    #     # assert np.allclose(self.K_E @ w, self.wperp_obs)
-
-    #     E_hat = self.select(y, w)
-    #     if np.all(E_hat == self.E):
-    #         return np.linalg.pinv(self.X_E) @ y
-    #     else:
-    #         return None
 
     def select_prob_hard_threshold(self, beta_hat, _):
         """
@@ -155,13 +138,6 @@ class RandomLasso(Selector):
             sel_probs[i] = np.mean(weights)
         return sel_probs
 
-    def _prob_sel_exact(self, beta_hat_):
-        mu_tilde = self.D @ (beta_hat_ - self.r)
-        return mvn(mean=-mu_tilde, cov=self.Omega).cdf(np.zeros(self.d))
-    
-    def prob_sel_exact(self, Z_target):
-        return np.array([self._prob_sel_exact(Z_target[j]) for j in range(Z_target.shape[0])])
-
     def mle_inference(self, w, target='selected', sig_level=0.05):
         feature_weights_ = np.ones(self.p) * self.lbd
         selector = lasso.gaussian(self.X, self.y, feature_weights_, sigma=self.sigma, ridge_term=0.)
@@ -179,35 +155,6 @@ class RandomLasso(Selector):
             raise NotImplementedError
         result = selector.inference(target_spec, 'selective_MLE', level=1-sig_level)
         return result
-    
-    def bivnormal_inference(self, w, sig_level=0.05):
-        """
-        condition on \hat\beta_{-j}, w_{E,-j}, and beta^\perp, w^\perp
-        only marginalize over w_{E,j}
-        """
-        Sigma_ = np.linalg.inv(self.X_E.T @ self.X_E)
-        scaled_s = self.s_E * (self.lbd * Sigma_ @ self.s_E)
-        scaled_w = self.s_E * (Sigma_ @ self.w[self.E])
-        # s_j * beta_hat_j - scaled_s[j] > scaled_w[j]
-        # scaled_w[j] | scaled_w[-j]
-        D = np.diag(self.s_E)
-        scaled_w_var = self.nu**2 * D @ Sigma_ @ D
-
-        pvalues = np.zeros(self.d)
-        cis = np.zeros((self.d, 2))
-        for j in range(self.d):
-            mask_j = np.ones(self.d, dtype=bool)
-            mask_j[j] = False
-
-            beta_j_cond_var = self.Sigma[j, j] - self.Sigma[j, mask_j] @ np.linalg.inv(self.Sigma[mask_j][:, mask_j]) @ self.Sigma[mask_j, j]
-            beta_j_cond_mean = self.Sigma[j, mask_j] @ np.linalg.inv(self.Sigma[mask_j][:, mask_j]) @ self.beta_hat[mask_j]
-            
-            w_j_cond_var = scaled_w_var[j, j] - scaled_w_var[j, mask_j] @ np.linalg.inv(scaled_w_var[mask_j][:, mask_j]) @ scaled_w_var[mask_j, j]
-            w_j_cond_mean = scaled_w_var[j, mask_j] @ np.linalg.inv(scaled_w_var[mask_j][:, mask_j]) @ scaled_w[mask_j] 
-            sel_prob = norm.cdf((self.s_E[j] * np.atleast_2d(beta_hat)[:, j] - scaled_s[j]), loc=cond_mean, scale=np.sqrt(cond_var))
-
-    def sampling_based_inference(self, sig_level=0.05):
-        pass
 
     def naive_inference(self, sig_level=0.05, beta=None):
         sd = np.sqrt(np.diag(self.Sigma))
@@ -219,6 +166,85 @@ class RandomLasso(Selector):
         else:
             pvals = 2 * ndtr(-abs((self.beta_hat - beta) / sd))
         return pvals, np.stack([lower, upper]).T
+    
+    def get_hard_threshold(self, a, b):
+        """
+        find {t: a * t - b > 0 }, where a, b \in \R^d
+        """
+        zero_idx = a == 0
+        if sum(zero_idx) and b[zero_idx] < 0:
+            return None
+        pos_idx = a > 0
+        if sum(pos_idx):
+            lb = np.max(b[pos_idx] / a[pos_idx])
+        else:
+            lb = -np.inf
+        neg_idx = a < 0
+        if sum(neg_idx):
+            ub = np.min(b[neg_idx] / a[neg_idx])
+        else:
+            ub = np.inf
+        return lb, ub
+
+    def adjusted_inference(self, neg_loglik, compute_ci=False, sig_level=0.05):
+        d = self.d
+        Sigma = self.Sigma
+        beta_sd = np.sqrt(np.diag(Sigma))
+        beta_hat = self.beta_hat
+        cis = np.zeros((d, 2))
+        pvalues = np.zeros(d)
+        if self.nu == 0:
+            for j in range(d):
+                eta = np.eye(d)[j]
+                c = Sigma @ eta / np.dot(eta, Sigma @ eta)
+                theta_hat = eta.dot(beta_hat)
+                beta_perp = beta_hat - c * theta_hat
+                a = c * self.s_E
+                b = -(beta_perp - self.lbd * np.linalg.inv(self.X_E.T @ self.X_E) @ self.s_E) * self.s_E
+                lb, ub = self.get_hard_threshold(a, b)
+                lb_finite = lb
+                ub_finite = ub
+                if np.isinf(lb):
+                    lb_finite = -20 * beta_sd[j]
+                if np.isinf(ub):
+                    ub_finite = 20 * beta_sd[j]
+                    
+                def logp_j(beta_hat_j, beta_null_j):
+                    beta_ = np.zeros(d)
+                    beta_[j] = beta_null_j
+                    return -neg_loglik(beta_perp + c * beta_hat_j, beta_)
+                
+                def _get_pvalue(beta_null_j):
+                    beta_ = np.zeros(d)
+                    beta_[j] = beta_null_j
+
+                    logp1 = logp_j(lb_finite, beta_null_j)
+                    logp2 = logp_j(ub_finite, beta_null_j)
+                    logp3 = logp_j(beta_hat[j], beta_null_j)
+
+                    _offset = np.nanmin([logp1, logp2, logp3])
+                    if np.isnan(_offset):
+                        return 0.
+                    
+                    grid = np.linspace(lb_finite, ub_finite, 200)
+                    logp = jax.vmap(logp_j, in_axes=(0, None))(grid, beta_null_j)
+                    logp = jnp.nan_to_num(logp)
+                    logp -= _offset
+                    log_normalization_const = logsumexp(logp)
+                    idx_left = (grid <= beta_hat[j]) 
+                    log_numerator_left = logsumexp(logp[idx_left])
+                    pval = np.exp(log_numerator_left - log_normalization_const)
+                    return 2 * min(pval, 1 - pval)
+
+                pvalues[j] = _get_pvalue(0.)
+                if compute_ci:
+                    cis[j] = ci_bisection(_get_pvalue, beta_sd[j], beta_hat[j] + 10 * beta_sd[j], beta_hat[j] - 10 * beta_sd[j], sig_level=sig_level, tol=1e-4)
+        else:
+            pass
+        if compute_ci:
+            return pvalues, cis
+        return pvalues
+
     
 class RandomLassoCV(RandomLasso):
     def __init__(self, X, y, sigma, alphas, nfold=10, nu=0., w=None):
