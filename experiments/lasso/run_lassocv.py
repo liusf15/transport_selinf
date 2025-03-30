@@ -50,7 +50,7 @@ def inference(logdensity_fn, select_prob_fn, beta_hat, Sigma, compute_ci=True, s
         return pvalues, cis
     return pvalues
 
-def run(seed, signal_fac, nu, n_train, max_iter, savepath=None):
+def run(seed, signal_fac, nu, rho, n_train, max_iter, savepath=None):
     n = 100
     p = 5
     s = 0
@@ -135,7 +135,7 @@ def run(seed, signal_fac, nu, n_train, max_iter, savepath=None):
     
     results_all = {'pvalues': pvalues_all}
     if savepath is not None:
-        prefix = f'lassocv_{n}_{p}_{s}_{nu}_{signal_fac}_train_{n_train}_iter_{max_iter}'
+        prefix = f'lassocv_{n}_{p}_{s}_{nu}_{signal_fac}_rho_{rho}_train_{n_train}_iter_{max_iter}'
         path = os.path.join(savepath, prefix)
         os.makedirs(path, exist_ok=True)
         filename = os.path.join(path, f'{seed}.pkl')
@@ -149,6 +149,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--signal_fac', type=float, default=.6)
     parser.add_argument('--nu', type=float, default=.3)
+    parser.add_argument('--rho', type=float, default=.5)
     parser.add_argument('--n_train', type=int, default=2000)
     parser.add_argument('--max_iter', type=int, default=3000)
     parser.add_argument('--rootdir', type=str, default='/mnt/ceph/users/sliu1/transport_selinf/')
@@ -156,4 +157,4 @@ if __name__ == '__main__':
 
     savepath = os.path.join(args.rootdir, args.date, 'lassocv')
 
-    run(seed=args.seed, signal_fac=args.signal_fac, nu=args.nu, n_train=args.n_train, max_iter=args.max_iter, savepath=savepath)
+    run(seed=args.seed, signal_fac=args.signal_fac, nu=args.nu, rho=args.rho, n_train=args.n_train, max_iter=args.max_iter, savepath=savepath)
