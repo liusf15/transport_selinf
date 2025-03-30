@@ -57,7 +57,6 @@ def run(seed, signal_fac, nu, n_train, max_iter, savepath=None):
     s = 0
     sigma = 1.
     rho = 0.9
-    signal_fac = signal_fac
     signal = np.sqrt(signal_fac * 2 * np.log(p))
     equi = False
     random_signs = False
