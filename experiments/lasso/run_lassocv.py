@@ -99,15 +99,17 @@ def run(seed, signal_fac, nu, rho, n_train, max_iter, savepath=None):
     samples_center = (samples - mean_shift) @ cov_chol
 
 
-    model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-3, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
+    model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
     losses = np.array(losses)
-    num_increases = np.sum(np.diff(losses[-100:]) > 0.)
-    if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(losses[-100:]) > 0.01 or num_increases > 10:
-        print("Unstable training, try learning rate 1e-4")
-        model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
-        losses = np.array(losses)
-        if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(losses[-100:]) > 0.01 or num_increases > 10:
-            print("Unstable training!!!")
+    print(losses[-10:])
+    print(np.std(losses[-100:]) / np.mean(losses[-100:]))
+    # num_increases = np.sum(np.diff(losses[-100:]) > 0.)
+    # if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(losses[-100:]) > 0.01 or num_increases > 10:
+    #     print("Unstable training, try learning rate 1e-4")
+    #     model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
+    #     losses = np.array(losses)
+    #     if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(losses[-100:]) > 0.01 or num_increases > 10:
+    #         print("Unstable training!!!")
 
     def neg_loglik_adjusted(beta_hat, beta_null):
         beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)

@@ -228,7 +228,7 @@ class RandomLasso(Selector):
                     
                     grid = np.linspace(lb_finite, ub_finite, 200)
                     logp = jax.vmap(logp_j, in_axes=(0, None))(grid, beta_null_j)
-                    logp = jnp.nan_to_num(logp)
+                    logp = jnp.nan_to_num(logp, nan=-np.inf)
                     logp -= _offset
                     log_normalization_const = logsumexp(logp)
                     idx_left = (grid <= beta_hat[j]) 
@@ -240,7 +240,36 @@ class RandomLasso(Selector):
                 if compute_ci:
                     cis[j] = ci_bisection(_get_pvalue, beta_sd[j], beta_hat[j] + 10 * beta_sd[j], beta_hat[j] - 10 * beta_sd[j], sig_level=sig_level, tol=1e-4)
         else:
-            pass
+            for j in range(d):
+                eta = np.eye(d)[j]
+                c = Sigma @ eta / (np.dot(eta, Sigma @ eta))
+                beta_perp = beta_hat - c * beta_hat[j]
+                gridsize = 200
+                sd_j = np.sqrt(Sigma[j, j])
+                grid = jnp.linspace(-10, 10, gridsize) * sd_j + beta_hat[j]
+                grids = np.outer(grid, c) + beta_perp
+                select_prob = self.select_prob_sov(grids, j)
+
+                def logp_j(beta_hat_j, beta_null_j):
+                    beta_ = np.zeros(d)
+                    beta_[j] = beta_null_j
+                    return -neg_loglik(beta_perp + c * beta_hat_j, beta_)
+
+                def get_pvalue(beta_null_j):
+                    logp = jax.vmap(logp_j, in_axes=(0, None))(grid, beta_null_j)
+                    logp = jnp.nan_to_num(logp, nan=-np.inf)
+                    logp -= logp.max()
+                    log_normalization_const = logsumexp(logp, b=select_prob)
+
+                    idx_left = (grid <= beta_hat[j]) 
+                    log_numerator_left = logsumexp(logp[idx_left], b=select_prob[idx_left])
+                    pval = np.exp(log_numerator_left - log_normalization_const)
+                    return 2 * min(pval, 1 - pval)
+            
+                pvalues[j] = get_pvalue(0.)
+                if compute_ci:
+                    cis[j] = ci_bisection(get_pvalue, sd_j, beta_hat[j] + 5 * sd_j, beta_hat[j] - 5 * sd_j, sig_level=sig_level, tol=1e-4)
+
         if compute_ci:
             return pvalues, cis
         return pvalues
@@ -258,13 +287,11 @@ class RandomLassoCV(RandomLasso):
         self.nfold = nfold
 
         self.nu = nu
-        if w is None:
-            self.w = np.zeros(self.p)
         
         self.alpha = self.select_lambda(y)
         self.lbd = self.alpha * self.n
 
-        super().__init__(X, y, sigma, lbd=self.lbd, nu=nu, w=w)
+        super().__init__(X, y, sigma, lbd=self.lbd, nu=self.nu, w=w)
 
         # self.beta_sol = self.solve_lasso(y, w, self.lbd)
         # E = abs(self.beta_sol) > 1e-10
