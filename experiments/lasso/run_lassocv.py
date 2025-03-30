@@ -12,7 +12,6 @@ from experiments.lasso.regression_designs import gaussian_instance
 from flows.train import train_nf
 from utils.utils import ci_bisection
 
-
 def inference(logdensity_fn, select_prob_fn, beta_hat, Sigma, compute_ci=True, sig_level=0.05):
     d = len(beta_hat)
     pvalues = np.zeros(d)
@@ -65,7 +64,7 @@ def run(seed, signal_fac, nu, n_train, max_iter, savepath=None):
     w = nu * X.T @ rng.normal(size=(n, ))
 
     alphas = np.logspace(-2, np.log10(5), 10) * np.sqrt(np.log(p)) / n
-    rl = RandomLassoCV(X, y, sigma, alphas, nu=nu, w=w)
+    rl = RandomLassoCV(X, y, sigma, alphas, nu=nu, w=w, nfold=10)
     d = rl.d
     print("selected", d, "variables")
     if d == 0:
@@ -76,51 +75,17 @@ def run(seed, signal_fac, nu, n_train, max_iter, savepath=None):
     pvalues_all = {}
 
     beta_target = np.linalg.pinv(rl.X_E) @ X @ beta
-    # result_mle = rl.mle_inference(w=w, sig_level=sig_level)
-    # intervals_all['mle'] = np.array([result_mle['lower_confidence'], result_mle['upper_confidence']]).T
-    # pvalues_all['mle'] = np.array(result_mle['pvalue'])
-
-    # feature_weights_ = np.ones(p) * rl.lbd
-    # selector = lasso.gaussian(X, y, feature_weights_, sigma=sigma, ridge_term=0.)
-    # signs = selector.fit(perturb=-w)
-    # nonzero = signs != 0
-    # if nonzero.sum() != d:
-    #     print("different selection")
-    #     return
-    # selector.setup_inference(dispersion=sigma**2)
-    # target_spec = selected_targets(selector.loglike, selector.observed_soln, dispersion=sigma**2)
-    # result_mle = selector.inference(target_spec, 'selective_MLE', level=1-sig_level)
+    beta_sd = np.sqrt(np.diag(rl.Sigma))
 
     result_mle = rl.mle_inference(w=w, sig_level=sig_level)
     intervals_all['mle'] = np.array([result_mle['lower_confidence'], result_mle['upper_confidence']]).T
     pvalues_all['mle'] = np.array(result_mle['pvalue'])
-
-    # result_exact = selector.inference(target_spec, 'exact', level=1-sig_level)
-    # intervals_all['exact'] = np.array([result_exact['lower_confidence'], result_exact['upper_confidence']]).T
-    # pvalues_all['exact'] = np.array(result_exact['pvalue'])
     pvalues_all['naive'], intervals_all['naive'] = rl.naive_inference(sig_level=sig_level)
 
-    beta_sd = np.sqrt(np.diag(rl.Sigma))
+    def preselect_logdensity(beta_hat, beta_null):
+        return mvn.logpdf(beta_hat, mean=beta_null, cov=rl.Sigma)
 
     print("Generating samples ...")
-    # def generate_one_sample(seed):
-    #     _rng = np.random.default_rng(seed)
-    #     beta_null = _rng.standard_normal(d) * beta_sd + rl.beta_hat
-    #     X = rl.resample(_rng, beta_null, num_samples=1, max_try=100)
-    #     if len(X) > 0:
-    #         return X[0], beta_null
-    #     return None, None
-
-    # start = time.time()
-    # seeds = rng.integers(low=0, high=2**32 - 1, size=n_train)
-    # results = Parallel(n_jobs=-1)(
-    #         delayed(generate_one_sample)(seed)
-    #         for seed in tqdm(seeds)
-    #     )
-    # end = time.time()
-
-    # samples = np.array([r[0] for r in results if r[0] is not None])
-    # contexts = np.array([r[1] for r in results if r[0] is not None])
     samples, contexts = rl.generate_training_data(rng, n_train, resample_scale=1., max_try=100)
     print("Generated", samples.shape[0], 'samples')
 
@@ -131,61 +96,35 @@ def run(seed, signal_fac, nu, n_train, max_iter, savepath=None):
     mean_shift = np.mean(samples, axis=0)
     cov_chol = np.linalg.cholesky(np.linalg.inv(np.atleast_2d(np.cov(samples.T))))
     samples_center = (samples - mean_shift) @ cov_chol
-    model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-3, max_iter=max_iter)
-    losses = np.array(losses)
-    if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(losses[-100:]) > 0.1:
-        print("Unstable training, try learning rate 1e-4")
-        model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter)
-    
-    def preselect_logdensity(beta_hat, beta_null):
-        return mvn.logpdf(beta_hat, mean=beta_null, cov=rl.Sigma)
 
+    if d == 1:
+        model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-1, max_iter=max_iter, hidden_dims=[8], num_bins=20)
+        if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(np.abs(losses[-100:])) > 0.1:
+            print("Unstable training, try learning rate 1e-2")
+            model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-2, max_iter=max_iter, hidden_dims=[8], num_bins=20)
+    else:
+        model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-3, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
+        if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(np.abs(losses[-100:])) > 0.1:
+            print("Unstable training, try learning rate 1e-4")
+            model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
+    
     @jax.jit
     def adjusted_logdensity_fn(beta_hat, beta_null):
         beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
-        # return -model.forward_kl(beta_hat_center_, params, beta_null)
         return -model.apply(params, beta_hat_center_, beta_null, method=model.forward_kl)
 
-    def get_logdensity_fn(adjust):
-        if adjust == 'adjusted':
-            return adjusted_logdensity_fn
-        elif adjust == 'preselect':
-            return preselect_logdensity
-        else:
-            raise ValueError(f"Invalid method {adjust}")
+    if nu > 0:
+        select_prob_fn = rl.select_prob_sov
+    else:
+        select_prob_fn = rl.select_prob_hard_threshold
     
-    def get_select_prob_fn(method):
-        if method == 'biv':
-            return rl.select_prob_bivnormal
-        elif method == 'hard_threshold':
-            return rl.select_prob_hard_threshold
-        elif method == 'sov':
-            return rl.select_prob_sov
-        else:
-            raise ValueError(f"Invalid method {method}")
-    
-    for adjust in ['adjusted', 'preselect']:
-        logdensity_fn = get_logdensity_fn(adjust)
-        # for method in ['sov']:
-        if nu > 0:
-            select_prob_fn = rl.select_prob_sov
-        else:
-            select_prob_fn = rl.select_prob_hard_threshold
-        pvalues = inference(logdensity_fn, select_prob_fn, rl.beta_hat, rl.Sigma, compute_ci=False, sig_level=sig_level)
-        # intervals_all[adjust + '_' + method] = ci
-        pvalues_all[adjust] = pvalues
+    pvalues_all['preselect'] = inference(preselect_logdensity, select_prob_fn, rl.beta_hat, rl.Sigma, compute_ci=False, sig_level=sig_level)
+    pvalues_all['adjusted'] = inference(adjusted_logdensity_fn, select_prob_fn, rl.beta_hat, rl.Sigma, compute_ci=False, sig_level=sig_level)
+    print(pvalues_all)
 
-    # pvalues_biv, ci_biv = inference(logdensity_fn, rl.select_prob_bivnormal, rl.beta_hat, rl.Sigma, sig_level)
-    # pvalues_hardthre, ci_hardthre = inference(logdensity_fn, rl.select_prob_hard_threshold, rl.beta_hat, rl.Sigma, sig_level)
-    # pvalues_sov, ci_sov = inference(logdensity_fn, rl.select_prob_sov, rl.beta_hat, rl.Sigma, sig_level)
-
-    # coverages_all = {}
-    # lengths_all = {}
     false_rejects_all = {}
     for key, item in pvalues_all.items():
         false_rejects_all[key] = item < sig_level
-        # coverages_all[key] = (interval[:, 0] <= beta_target) * (interval[:, 1] >= beta_target)
-    #     lengths_all[key] = interval[:, 1] - interval[:, 0]
     print(false_rejects_all)
     
     results_all = {'pvalues': pvalues_all}

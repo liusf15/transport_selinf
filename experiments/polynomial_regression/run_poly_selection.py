@@ -73,7 +73,7 @@ def run(seed, n_train, resample_scale, max_iter):
     beta_hat = selector.beta_hat
     Sigma = selector.Sigma
     beta_sd = np.sqrt(np.diag(Sigma))
-    Sigma_sqrt = np.linalg.cholesky(Sigma)
+
     sig_level = 0.05
     q = norm.ppf(sig_level / 2)
     lower = beta_hat + q * beta_sd
