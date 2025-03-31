@@ -7,7 +7,7 @@ def ci_bisection(get_pvalue, sd, right, left, sig_level=0.05, tol=1e-6):
     if pval_t < sig_level:
         up = right
         t = right
-        for i in range(100):
+        for i in range(200):
             t = t - incre
             pval_t = get_pvalue(t)
             if pval_t >= sig_level - tol:
@@ -21,7 +21,7 @@ def ci_bisection(get_pvalue, sd, right, left, sig_level=0.05, tol=1e-6):
     else:
         lo = right
         t = right
-        for i in range(100):
+        for i in range(200):
             t = t + incre
             pval_t = get_pvalue(t)
             if pval_t <= sig_level + tol:
@@ -33,7 +33,7 @@ def ci_bisection(get_pvalue, sd, right, left, sig_level=0.05, tol=1e-6):
     if up is None:
         rightend = float('inf')
     else:
-        for i in range(100):
+        for i in range(200):
             if up - lo <= tol:
                 break
             mid = (lo + up) / 2
@@ -54,7 +54,7 @@ def ci_bisection(get_pvalue, sd, right, left, sig_level=0.05, tol=1e-6):
     if pval_t < sig_level:
         lo = left
         t = left
-        for i in range(100):
+        for i in range(200):
             t = t + incre
             pval_t = get_pvalue(t)
             if pval_t >= sig_level - tol:
@@ -68,7 +68,7 @@ def ci_bisection(get_pvalue, sd, right, left, sig_level=0.05, tol=1e-6):
     else:
         up = left
         t = left
-        for i in range(100):
+        for i in range(200):
             t = t - incre
             pval_t = get_pvalue(t)
             if pval_t <= sig_level + tol:
@@ -80,7 +80,7 @@ def ci_bisection(get_pvalue, sd, right, left, sig_level=0.05, tol=1e-6):
         leftend = -float('inf')
     else:
         # bisection
-        for i in range(100):
+        for i in range(200):
             if up - lo <= tol:
                 break
             mid = (lo + up) / 2

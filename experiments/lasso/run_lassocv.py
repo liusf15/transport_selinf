@@ -9,7 +9,7 @@ from scipy.special import logsumexp
 
 from experiments.lasso.randomized_lasso import RandomLassoCV
 from experiments.lasso.regression_designs import gaussian_instance
-from flows.train import train_nf
+from flows.train import train_nf, train_with_validation
 from utils.utils import ci_bisection
 
 def inference(logdensity_fn, select_prob_fn, beta_hat, Sigma, compute_ci=True, sig_level=0.05):
@@ -50,7 +50,7 @@ def inference(logdensity_fn, select_prob_fn, beta_hat, Sigma, compute_ci=True, s
         return pvalues, cis
     return pvalues
 
-def run(seed, signal_fac, nu, rho, n_train, max_iter, savepath=None):
+def run(seed, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, savepath=None):
     n = 100
     p = 5
     s = 0
@@ -84,48 +84,83 @@ def run(seed, signal_fac, nu, rho, n_train, max_iter, savepath=None):
     def neg_loglik(beta_hat, beta_null):
         return -mvn.logpdf(beta_hat, mean=beta_null, cov=rl.Sigma)
     
-    pvalues_all['preselect'] = rl.adjusted_inference(neg_loglik, compute_ci=False, sig_level=sig_level)
+    pvalues_all['preselect'], intervals_all['preselect'] = rl.adjusted_inference(neg_loglik, compute_ci=True, sig_level=sig_level)
 
     print("Generating samples ...")
-    samples, contexts = rl.generate_training_data(rng, n_train, resample_scale=1., max_try=100)
-    print("Generated", samples.shape[0], 'samples')
+    train_samples, train_contexts = rl.generate_training_data(rng, n_train+n_val, resample_scale=1., max_try=100)
+    print("Generated", train_samples.shape[0], 'samples')
 
-    if samples.shape[0] == 0:
+    if train_samples.shape[0] == 0:
         print("Failed to generate training data")
         return
     
-    mean_shift = np.mean(samples, axis=0)
-    cov_chol = np.linalg.cholesky(np.linalg.inv(np.atleast_2d(np.cov(samples.T))))
-    samples_center = (samples - mean_shift) @ cov_chol
+    mean_shift = np.mean(train_samples, axis=0)
+    cov_chol = np.linalg.cholesky(np.linalg.inv(np.atleast_2d(np.cov(train_samples.T))))
+    samples_center = (train_samples - mean_shift) @ cov_chol
 
+    val_samples = samples_center[n_train:]
+    val_contexts = train_contexts[n_train:]
+    train_samples = samples_center[:n_train]
+    train_contexts = train_contexts[:n_train]
 
-    model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
-    losses = np.array(losses)
-    print(losses[-10:])
-    print(np.std(losses[-100:]) / np.mean(losses[-100:]))
-    # num_increases = np.sum(np.diff(losses[-100:]) > 0.)
-    # if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(losses[-100:]) > 0.01 or num_increases > 10:
-    #     print("Unstable training, try learning rate 1e-4")
-    #     model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=8)
-    #     losses = np.array(losses)
-    #     if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(losses[-100:]) > 0.01 or num_increases > 10:
-    #         print("Unstable training!!!")
+    def train_and_inference(max_iter, n_layers):
+        # model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[hidden_dim], n_layers=n_layers)
+        model, params, val_losses = train_with_validation(train_samples, train_contexts, val_samples, val_contexts, learning_rate=1e-4, max_iter=max_iter, checkpoint_every=1000, hidden_dims=[hidden_dim], n_layers=n_layers, num_bins=20, seed=0)
+        val_losses = np.array(val_losses)
+        def neg_loglik_adjusted(beta_hat, beta_null):
+            beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
+            return model.apply(params, beta_hat_center_, beta_null, method=model.forward_kl)
+        pval, ci = rl.adjusted_inference(neg_loglik_adjusted, compute_ci=True, sig_level=sig_level)
+        return pval, ci, val_losses
+    
+    
+    # losses = {}
+    # print(f"Training with learning rate 1e-4, iteration=4000, n_layers=12")
+    # max_iter = 4000
+    pvalues_all[f'adjusted'] , intervals_all[f'adjusted'], val_losses = train_and_inference(5000, 12)
+    # pvalues_all[f'adjusted_{max_iter}'] = nf_pvalue
+    # intervals_all[f'adjusted_{max_iter}'] = nf_ci
+    # losses[f'{max_iter}'] = loss
 
-    def neg_loglik_adjusted(beta_hat, beta_null):
-        beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
-        return model.apply(params, beta_hat_center_, beta_null, method=model.forward_kl)
-    pvalues_all['adjusted'] = rl.adjusted_inference(neg_loglik_adjusted, compute_ci=False, sig_level=sig_level)
+    # if np.isnan(nf_pvalue).any() or np.isinf(nf_ci).any():
+    #     print("Training with learning rate 1e-4, iteration=8000, n_layers=12")
+    #     max_iter = 8000
+    #     nf_pvalue, nf_ci, loss = train_and_inference(max_iter, 12)
+    #     pvalues_all[f'adjusted_{max_iter}'] = nf_pvalue
+    #     intervals_all[f'adjusted_{max_iter}'] = nf_ci
+    #     losses[f'{max_iter}'] = loss
 
+    #     if np.isnan(nf_pvalue).any() or np.isinf(nf_ci).any():
+    #         print("Training with learning rate 1e-4, iteration=2000, n_layers=12")
+    #         max_iter = 2000
+    #         nf_pvalue, nf_ci, loss = train_and_inference(max_iter, 12)
+    #         pvalues_all[f'adjusted_{max_iter}'] = nf_pvalue
+    #         intervals_all[f'adjusted_{max_iter}'] = nf_ci
+    #         losses[f'{max_iter}'] = loss
+
+    #         if np.isnan(nf_pvalue).any() or np.isinf(nf_ci).any():
+    #             max_iter = 1000
+    #             print("Training with learning rate 1e-4, iteration=1000, n_layers=12")
+    #             nf_pvalue, nf_ci, loss = train_and_inference(max_iter, 12)
+    #             pvalues_all[f'adjusted_{max_iter}'] = nf_pvalue
+    #             intervals_all[f'adjusted_{max_iter}'] = nf_ci
+    #             losses[f'{max_iter}'] = loss
+    
+    
     print(pvalues_all)
+    print(intervals_all)
 
     false_rejects_all = {}
+    coverages_all = {}
     for key, item in pvalues_all.items():
         false_rejects_all[key] = item < sig_level
+        coverages_all[key] = (intervals_all[key][:, 0] <= beta_target) * (beta_target <= intervals_all[key][:, 1])
     print(false_rejects_all)
+    print(coverages_all)
     
-    results_all = {'pvalues': pvalues_all}
+    results_all = {'pvalues': pvalues_all, 'intervals': intervals_all, 'false_rejects': false_rejects_all, 'coverages': coverages_all, 'losses': val_losses}
     if savepath is not None:
-        prefix = f'lassocv_{n}_{p}_{s}_{nu}_{signal_fac}_rho_{rho}_train_{n_train}_iter_{max_iter}'
+        prefix = f'lassocv_{n}_{p}_{s}_{nu}_{signal_fac}_rho_{rho}_train_{n_train}_val_{n_val}_hidden_{hidden_dim}'
         path = os.path.join(savepath, prefix)
         os.makedirs(path, exist_ok=True)
         filename = os.path.join(path, f'{seed}.pkl')
@@ -141,10 +176,13 @@ if __name__ == '__main__':
     parser.add_argument('--nu', type=float, default=.3)
     parser.add_argument('--rho', type=float, default=.5)
     parser.add_argument('--n_train', type=int, default=2000)
+    parser.add_argument('--n_val', type=int, default=1000)
     parser.add_argument('--max_iter', type=int, default=3000)
+    parser.add_argument('--n_layers', type=int, default=8)
+    parser.add_argument('--hidden_dim', type=int, default=8)
     parser.add_argument('--rootdir', type=str, default='/mnt/ceph/users/sliu1/transport_selinf/')
     args = parser.parse_args()
 
     savepath = os.path.join(args.rootdir, args.date, 'lassocv')
 
-    run(seed=args.seed, signal_fac=args.signal_fac, nu=args.nu, rho=args.rho, n_train=args.n_train, max_iter=args.max_iter, savepath=savepath)
+    run(seed=args.seed, signal_fac=args.signal_fac, nu=args.nu, rho=args.rho, n_train=args.n_train, n_val=args.n_val, hidden_dim=args.hidden_dim, savepath=savepath)

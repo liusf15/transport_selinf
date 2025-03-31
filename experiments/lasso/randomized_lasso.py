@@ -238,7 +238,7 @@ class RandomLasso(Selector):
 
                 pvalues[j] = _get_pvalue(0.)
                 if compute_ci:
-                    cis[j] = ci_bisection(_get_pvalue, beta_sd[j], beta_hat[j] + 10 * beta_sd[j], beta_hat[j] - 10 * beta_sd[j], sig_level=sig_level, tol=1e-4)
+                    cis[j] = ci_bisection(_get_pvalue, beta_sd[j], beta_hat[j] + 5 * beta_sd[j], beta_hat[j] - 5 * beta_sd[j], sig_level=sig_level, tol=1e-4)
         else:
             for j in range(d):
                 eta = np.eye(d)[j]
@@ -268,7 +268,7 @@ class RandomLasso(Selector):
             
                 pvalues[j] = get_pvalue(0.)
                 if compute_ci:
-                    cis[j] = ci_bisection(get_pvalue, sd_j, beta_hat[j] + 5 * sd_j, beta_hat[j] - 5 * sd_j, sig_level=sig_level, tol=1e-4)
+                    cis[j] = ci_bisection(get_pvalue, sd_j, beta_hat[j] + 3 * sd_j, beta_hat[j] - 3 * sd_j, sig_level=sig_level, tol=1e-4)
 
         if compute_ci:
             return pvalues, cis
