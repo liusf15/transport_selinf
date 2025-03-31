@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.special import ndtr, ndtri
 import statsmodels.formula.api as smf
 from statsmodels.stats.anova import anova_lm
 from experiments.selector import Selector
@@ -41,4 +42,3 @@ class PolynomialSelection(Selector):
             return np.array(selected_model.params.iloc[1:])
         else:
             return None
-
