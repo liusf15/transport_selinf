@@ -103,9 +103,9 @@ def run(seed, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, savepath=N
     train_samples = samples_center[:n_train]
     train_contexts = train_contexts[:n_train]
 
-    def train_and_inference(max_iter, n_layers):
+    def train_and_inference(seed):
         # model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[hidden_dim], n_layers=n_layers)
-        model, params, val_losses = train_with_validation(train_samples, train_contexts, val_samples, val_contexts, learning_rate=1e-4, max_iter=max_iter, checkpoint_every=1000, hidden_dims=[hidden_dim], n_layers=n_layers, num_bins=20, seed=0)
+        model, params, val_losses = train_with_validation(train_samples, train_contexts, val_samples, val_contexts, learning_rate=1e-4, max_iter=10000, checkpoint_every=1000, hidden_dims=[hidden_dim], n_layers=12, num_bins=20, seed=seed)
         val_losses = np.array(val_losses)
         def neg_loglik_adjusted(beta_hat, beta_null):
             beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
@@ -117,7 +117,11 @@ def run(seed, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, savepath=N
     # losses = {}
     # print(f"Training with learning rate 1e-4, iteration=4000, n_layers=12")
     # max_iter = 4000
-    pvalues_all[f'adjusted'] , intervals_all[f'adjusted'], val_losses = train_and_inference(5000, 12)
+    for _seed in range(10):
+        print("Training seed: ", _seed)
+        pvalues_all[f'adjusted'] , intervals_all[f'adjusted'], val_losses = train_and_inference(seed=_seed)
+        if (not np.isnan(pvalues_all[f'adjusted']).any()) and (not np.isinf(intervals_all[f'adjusted']).any()):
+            break
     # pvalues_all[f'adjusted_{max_iter}'] = nf_pvalue
     # intervals_all[f'adjusted_{max_iter}'] = nf_ci
     # losses[f'{max_iter}'] = loss
