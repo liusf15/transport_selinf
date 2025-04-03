@@ -1,30 +1,14 @@
 import numpy as np
 import os
 import argparse
-import pickle
 import pandas as pd
-import jax.numpy as jnp
 from scipy.stats import chi2
 from sklearn.preprocessing import SplineTransformer, StandardScaler
-from sklearn.linear_model import LinearRegression
-from sklearn.pipeline import make_pipeline
-from sklearn.model_selection import GridSearchCV
-import statsmodels.api as sm
-from statsmodels.stats.anova import anova_lm
-import jax
-import jax.numpy as jnp
-from flows.realnvp import RealNVP
-from flows.train import train
 
 from experiments.spline.spline_selector import SplineSelection
-from flows.train import train_nf, train_with_validation
+from flows.train import train_with_validation
 
 
-def inference(model, params, beta_hat):
-    d = beta_hat.shape[0]
-    z_value = model.apply(params, beta_hat, context=None, method=model.inverse)[0]
-    return chi2.sf(np.sum(z_value**2), df=d)
-    
 def generate_data(seed):
     rng = np.random.default_rng(seed)    
     return mu + rng.normal(size=(n,)) * sigma
@@ -32,7 +16,7 @@ def generate_data(seed):
 def run(seed, n_train, n_val, hidden_dim):
     y = generate_data(seed)
 
-    selector = SplineSelection(x, y)
+    selector = SplineSelection(x, y, sigma)
     d = selector.d
     naive_pval = selector.naive_F_test()
 

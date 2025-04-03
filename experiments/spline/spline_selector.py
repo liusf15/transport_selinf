@@ -10,9 +10,10 @@ from tqdm import tqdm
 from experiments.selector import Selector
 
 class SplineSelection(Selector):
-    def __init__(self, x, y):
+    def __init__(self, x, y, sigma=1.):
         self.x = x
         self.y = y
+        self.sigma = sigma
         self.n = x.shape[0]
 
         self.n_knots = self.select(y)
@@ -26,9 +27,6 @@ class SplineSelection(Selector):
         self.beta_hat = np.array(self.selected_model.params[1:])
         self.d = len(self.beta_hat)
         self.intercept = self.selected_model.params[0]
-        self.sigma = np.sqrt(self.selected_model.scale)
-        self.Sigma = self.selected_model.cov_params()[1:, 1:]
-        self.Sigma_sqrt = np.linalg.cholesky(self.Sigma)
     
     def select(self, y):
         pipe = make_pipeline(
@@ -72,4 +70,4 @@ class SplineSelection(Selector):
                 delayed(_generator)(seed)
                 for seed in tqdm(seeds)
             )
-        return np.stack(samples)
+        return np.array([r for r in samples if r is not None])
