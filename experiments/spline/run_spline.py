@@ -48,7 +48,7 @@ def run(seed, n_train, n_val):
     for _seed in range(3):
         print("Training seed: ", _seed, "lr: ", learning_rate)
         pval, val_losses = train_and_inference(seed=_seed, learning_rate=learning_rate, hidden_dim=hidden_dim)
-        if np.isnan(val_losses[-1]) or (val_losses[-1] - val_losses[-2] > 1) or (val_losses[-1] > val_losses[0]) or (np.isnan(pval)):
+        if np.isnan(val_losses[-1]) or (val_losses[-1] - val_losses[0] > 1e3) or (np.isnan(pval)):
             print("Training failed")
             continue
         else:
@@ -61,7 +61,7 @@ def run(seed, n_train, n_val):
         for _seed in range(3, 6):
             print("Training seed: ", _seed, "lr: ", learning_rate)
             pval, val_losses = train_and_inference(seed=_seed, learning_rate=learning_rate, hidden_dim=hidden_dim)
-            if np.isnan(val_losses[-1]) or (val_losses[-1] - val_losses[-2] > .1) or (val_losses[-1] > val_losses[0]) or (np.isnan(pval)):
+            if np.isnan(val_losses[-1]) or (val_losses[-1] - val_losses[0] > 1e3) or (np.isnan(pval)):
                 print("Training failed")
                 continue
             else:
