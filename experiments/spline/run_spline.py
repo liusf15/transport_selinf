@@ -29,10 +29,17 @@ def run(seed, n_train, n_val, hidden_dim):
         print("Failed to generate training data")
         return
 
+    mean_shift = np.mean(train_samples, axis=0)
+    cov_chol = np.linalg.cholesky(np.linalg.inv(np.atleast_2d(np.cov(train_samples.T))))
+    samples_center = (train_samples - mean_shift) @ cov_chol
+    beta_hat_center = cov_chol.T @ (selector.beta_hat - mean_shift)
+
     def train_and_inference(seed):
-        model, params, val_losses = train_with_validation(train_samples[:n_train], None, train_samples[n_train:], None, learning_rate=1e-4, max_iter=10000, checkpoint_every=1000, hidden_dims=[hidden_dim], n_layers=12, num_bins=20, seed=seed)
-        z_value = model.apply(params, selector.beta_hat, context=None, method=model.inverse)[0]
+        model, params, val_losses = train_with_validation(samples_center[:n_train], None, samples_center[n_train:], None, learning_rate=1e-4, max_iter=10000, checkpoint_every=1000, hidden_dims=[hidden_dim], n_layers=12, num_bins=20, seed=seed)
+        z_value = model.apply(params, beta_hat_center, context=None, method=model.inverse)[0]
         pval = chi2.sf(np.sum(z_value**2), df=d)
+        if np.isinf(z_value).any():
+            return np.nan, val_losses
         return pval, val_losses
     
     for _seed in range(10):
