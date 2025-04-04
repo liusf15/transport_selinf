@@ -94,6 +94,6 @@ def train_with_validation(train_samples, train_contexts, val_samples, val_contex
         if val_loss < min_val_loss:
             min_val_loss = val_loss
             best_params = params
-        if val_loss > 1e10:
+        if val_loss > 1e6:
             break
     return model, best_params, val_losses
