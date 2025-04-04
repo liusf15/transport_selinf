@@ -23,7 +23,7 @@ def run(seed, n_train, n_val):
     print("Generating samples ...")
     rng = np.random.default_rng(0)
     train_samples = selector.sample_from_global_null(rng, n_train+n_val)
-    print("Generated", train_samples.shape[0], 'samples')
+    print("Sample size", train_samples.shape[0])
 
     if train_samples.shape[0] == 0:
         print("Failed to generate training data")
@@ -34,8 +34,8 @@ def run(seed, n_train, n_val):
     samples_center = (train_samples - mean_shift) @ cov_chol
     beta_hat_center = cov_chol.T @ (selector.beta_hat - mean_shift)
 
-    def train_and_inference(seed, learning_rate, hidden_dim):
-        model, params, val_losses = train_with_validation(samples_center[:n_train], None, samples_center[n_train:], None, learning_rate=learning_rate, max_iter=10000, checkpoint_every=1000, hidden_dims=[hidden_dim], n_layers=12, num_bins=20, seed=seed)
+    def train_and_inference(seed, max_iter, learning_rate, hidden_dims):
+        model, params, val_losses = train_with_validation(samples_center[:n_train], None, samples_center[n_train:], None, learning_rate=learning_rate, max_iter=max_iter, checkpoint_every=1000, hidden_dims=hidden_dims, n_layers=12, num_bins=20, seed=seed)
         z_value = model.apply(params, beta_hat_center, context=None, method=model.inverse)[0]
         pval = chi2.sf(np.sum(z_value**2), df=d)
         if np.isinf(z_value).any():
@@ -43,12 +43,12 @@ def run(seed, n_train, n_val):
         return pval, val_losses
     
     learning_rate = 1e-4
-    hidden_dim = max(8, 2*d)
+    hidden_dims = [8]
     flag = False
     for _seed in range(3):
         print("Training seed: ", _seed, "lr: ", learning_rate)
-        pval, val_losses = train_and_inference(seed=_seed, learning_rate=learning_rate, hidden_dim=hidden_dim)
-        if np.isnan(val_losses[-1]) or (val_losses[-1] - val_losses[0] > 1e3) or (np.isnan(pval)):
+        pval, val_losses = train_and_inference(seed=_seed, max_iter=10000, learning_rate=learning_rate, hidden_dims=hidden_dims)
+        if np.isnan(val_losses[-1]) or (val_losses[-1] - val_losses[0] > 1e4) or (np.isnan(pval)):
             print("Training failed")
             continue
         else:
@@ -58,14 +58,15 @@ def run(seed, n_train, n_val):
     
     if not flag:
         learning_rate = 1e-5
+        hidden_dims = [8]
         for _seed in range(3, 6):
             print("Training seed: ", _seed, "lr: ", learning_rate)
-            pval, val_losses = train_and_inference(seed=_seed, learning_rate=learning_rate, hidden_dim=hidden_dim)
-            if np.isnan(val_losses[-1]) or (val_losses[-1] - val_losses[0] > 1e3) or (np.isnan(pval)):
-                print("Training failed")
+            pval, val_losses = train_and_inference(seed=_seed, max_iter=20000, learning_rate=learning_rate, hidden_dims=hidden_dims)
+            if np.isnan(val_losses[-1]) or (val_losses[-1] - val_losses[0] > 1e4) or (np.isnan(pval)):
+                print("Training failed", pval)
                 continue
             else:
-                print("Training succeeded")
+                print("Training succeeded", pval)
                 flag = True
                 break
     
@@ -85,7 +86,7 @@ if __name__ == "__main__":
     parser.add_argument('--signal_fac', type=float, default=1.)
     parser.add_argument('--n_train', type=int, default=1000)
     parser.add_argument('--n_val', type=int, default=1000)
-    parser.add_argument('--hidden_dim', type=int, default=8)
+    parser.add_argument('--max_knots', type=int, default=5)
     parser.add_argument('--rootdir', type=str, default='/mnt/ceph/users/sliu1/transport_selinf/')
     args = parser.parse_args()
 
@@ -105,7 +106,7 @@ if __name__ == "__main__":
     results = run(args.seed, n_train=args.n_train, n_val=args.n_val)
     if results is not None:
         savepath = os.path.join(args.rootdir, args.date, 'spline')
-        prefix = f'spline_{n}_signal_{args.signal_fac}_train_{args.n_train}_val_{args.n_val}'
+        prefix = f'spline_{n}_signal_{args.signal_fac}_train_{args.n_train}_val_{args.n_val}_maxknots_{args.max_knots}'
         path = os.path.join(savepath, prefix)
         os.makedirs(path, exist_ok=True)
         filename = os.path.join(path, f'{seed}.csv')

@@ -10,10 +10,11 @@ from tqdm import tqdm
 from experiments.selector import Selector
 
 class SplineSelection(Selector):
-    def __init__(self, x, y, sigma=1.):
+    def __init__(self, x, y, sigma=1., maximum_knots=5):
         self.x = x
         self.y = y
         self.sigma = sigma
+        self.maximum_knots = maximum_knots  
         self.n = x.shape[0]
 
         self.n_knots = self.select(y)
@@ -34,7 +35,7 @@ class SplineSelection(Selector):
             LinearRegression(fit_intercept=True)
         )
         param_grid = {
-            "splinetransformer__n_knots": [2, 3, 4, 5, 6],
+            "splinetransformer__n_knots": np.arange(2, self.maximum_knots + 1),
         }
         grid = GridSearchCV(pipe, param_grid, scoring='neg_mean_squared_error', cv=5)
         grid.fit(self.x, y)
