@@ -13,10 +13,10 @@ def generate_data(seed):
     rng = np.random.default_rng(seed)    
     return mu + rng.normal(size=(n,)) * sigma
 
-def run(seed, n_train, n_val):
+def run(seed, n_train, n_val, n_fold=5):
     y = generate_data(seed)
 
-    selector = SplineSelection(x, y, sigma)
+    selector = SplineSelection(x, y, sigma, n_fold=n_fold, scale=True)
     d = selector.d
     naive_pval = selector.naive_F_test()
 
@@ -43,7 +43,7 @@ def run(seed, n_train, n_val):
         return pval, val_losses
     
     learning_rate = 1e-4
-    hidden_dims = [8]
+    hidden_dims = [12]
     flag = False
     for _seed in range(3):
         print("Training seed: ", _seed, "lr: ", learning_rate)
@@ -58,10 +58,10 @@ def run(seed, n_train, n_val):
     
     if not flag:
         learning_rate = 1e-5
-        hidden_dims = [8]
+        hidden_dims = [12]
         for _seed in range(3, 6):
             print("Training seed: ", _seed, "lr: ", learning_rate)
-            pval, val_losses = train_and_inference(seed=_seed, max_iter=20000, learning_rate=learning_rate, hidden_dims=hidden_dims)
+            pval, val_losses = train_and_inference(seed=_seed, max_iter=10000, learning_rate=learning_rate, hidden_dims=hidden_dims)
             if np.isnan(val_losses[-1]) or (val_losses[-1] - val_losses[0] > 1e4) or (np.isnan(pval)):
                 print("Training failed", pval)
                 continue
@@ -86,6 +86,7 @@ if __name__ == "__main__":
     parser.add_argument('--signal_fac', type=float, default=1.)
     parser.add_argument('--n_train', type=int, default=1000)
     parser.add_argument('--n_val', type=int, default=1000)
+    parser.add_argument('--n_fold', type=int, default=10)
     parser.add_argument('--max_knots', type=int, default=5)
     parser.add_argument('--rootdir', type=str, default='/mnt/ceph/users/sliu1/transport_selinf/')
     args = parser.parse_args()
@@ -103,10 +104,10 @@ if __name__ == "__main__":
     snr = np.sqrt(np.var(mu) / sigma**2)
 
     seed = args.seed
-    results = run(args.seed, n_train=args.n_train, n_val=args.n_val)
+    results = run(args.seed, n_train=args.n_train, n_val=args.n_val, n_fold=args.n_fold)
     if results is not None:
         savepath = os.path.join(args.rootdir, args.date, 'spline')
-        prefix = f'spline_{n}_signal_{args.signal_fac}_train_{args.n_train}_val_{args.n_val}_maxknots_{args.max_knots}'
+        prefix = f'spline_{n}_signal_{args.signal_fac}_train_{args.n_train}_val_{args.n_val}_maxknots_{args.max_knots}_cv_{args.n_fold}'
         path = os.path.join(savepath, prefix)
         os.makedirs(path, exist_ok=True)
         filename = os.path.join(path, f'{seed}.csv')

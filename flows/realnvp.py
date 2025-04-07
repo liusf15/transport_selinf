@@ -14,7 +14,8 @@ class ConditionerMLP(nn.Module):
     @nn.compact
     def __call__(self, x):
         for h in self.hidden_dims:
-            x = self.activation(nn.Dense(h)(x))
+            x = self.activation(nn.Dense(h, 
+                                         kernel_init=nn.initializers.variance_scaling(scale=0.1, mode="fan_in", distribution="normal"))(x))
         x = nn.Dense(
             2 * self.output_dim,
             # kernel_init=nn.initializers.zeros_init(),

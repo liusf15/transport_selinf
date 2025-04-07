@@ -10,21 +10,24 @@ from tqdm import tqdm
 from experiments.selector import Selector
 
 class SplineSelection(Selector):
-    def __init__(self, x, y, sigma=1., maximum_knots=5):
+    def __init__(self, x, y, sigma=1., maximum_knots=5, n_fold=10, scale=False):
         self.x = x
         self.y = y
         self.sigma = sigma
         self.maximum_knots = maximum_knots  
+        self.n_fold = n_fold
         self.n = x.shape[0]
 
         self.n_knots = self.select(y)
         spline_transformer = SplineTransformer(n_knots=self.n_knots, include_bias=False)
         X_basis = spline_transformer.fit_transform(x)
-        scalar_transformer = StandardScaler()
-        self.X = scalar_transformer.fit_transform(X_basis)
+        if scale:
+            scalar_transformer = StandardScaler()
+            self.X = scalar_transformer.fit_transform(X_basis)
+        else:
+            self.X = X_basis
         self.X = sm.add_constant(self.X)
         self.selected_model = sm.OLS(y, self.X).fit()
-        # X = sm.add_constant(x)
         self.beta_hat = np.array(self.selected_model.params[1:])
         self.d = len(self.beta_hat)
         self.intercept = self.selected_model.params[0]
@@ -37,7 +40,7 @@ class SplineSelection(Selector):
         param_grid = {
             "splinetransformer__n_knots": np.arange(2, self.maximum_knots + 1),
         }
-        grid = GridSearchCV(pipe, param_grid, scoring='neg_mean_squared_error', cv=5)
+        grid = GridSearchCV(pipe, param_grid, scoring='neg_mean_squared_error', cv=self.n_fold)
         grid.fit(self.x, y)
 
         n_knots = grid.best_params_['splinetransformer__n_knots']
