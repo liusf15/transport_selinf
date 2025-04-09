@@ -53,14 +53,16 @@ def inference(model, params, suff_stat, sd_suff_stat, beta_hat, sd_beta, mean_sh
             @jax.jit
             def get_pvalue(beta_null_j):
                 logp = jax.vmap(logp_j, in_axes=(0, None))(grid, beta_null_j)
-                logp = jnp.nan_to_num(logp)
+                isnan = jnp.all(jnp.isnan(logp))
+                logp = jnp.nan_to_num(logp, nan=-np.inf)
                 logp -= logp.max()
                 log_normalization_const = logsumexp(logp)
 
                 idx_left = (grid <= suff_stat[j]) 
                 log_numerator_left = logsumexp(jnp.where(idx_left, logp, -jnp.inf))
                 pval = jnp.exp(log_numerator_left - log_normalization_const)
-                return jax.lax.select(pval < 0.5, 2 * pval, 2 * (1 - pval))
+                pval = jax.lax.select(pval < 0.5, 2 * pval, 2 * (1 - pval))
+                return jax.lax.select(isnan, 0., pval)
 
             pvalues[j] = get_pvalue(0.)
             if compute_ci:
