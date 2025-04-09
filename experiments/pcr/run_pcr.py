@@ -71,14 +71,14 @@ def inference(model, params, suff_stat, sd_suff_stat, beta_hat, sd_beta, mean_sh
     return global_pval, pvalues
 
 
-def generate_data(seed):
+def generate_data(seed, rho):
     rng = np.random.default_rng(seed)
-    X = rng.multivariate_normal(mean=np.zeros(p), cov=0.9 ** np.abs(np.subtract.outer(np.arange(p), np.arange(p))), size=n)
+    X = rng.multivariate_normal(mean=np.zeros(p), cov=rho ** np.abs(np.subtract.outer(np.arange(p), np.arange(p))), size=n)
     y = rng.binomial(1, 0.5, size=n)
     return X, y
 
-def run(seed, n_train, n_val, n_fold=5):
-    X, y = generate_data(seed)
+def run(seed, rho, n_train, n_val, n_fold=5):
+    X, y = generate_data(seed, rho)
     selector = PCRSelection(X, y, n_fold=n_fold)
     d = selector.d
     if d == 0:
@@ -135,8 +135,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--date', type=str, default='20250409')
     parser.add_argument('--seed', type=int, default=0)
-    
-    parser.add_argument('--rho', type=float, default=.5)
+    parser.add_argument('--rho', type=float, default=.9)
     parser.add_argument('--n_train', type=int, default=2000)
     parser.add_argument('--n_val', type=int, default=1000)
     parser.add_argument('--max_iter', type=int, default=3000)
@@ -147,11 +146,11 @@ if __name__ == "__main__":
 
     savepath = os.path.join(args.rootdir, args.date, 'pcr')
 
-    results = run(seed=args.seed, n_train=args.n_train, n_val=args.n_val, n_fold=5)
+    results = run(seed=args.seed, rho=args.rho, n_train=args.n_train, n_val=args.n_val, n_fold=5)
     if results is not None:
         savepath = os.path.join(args.rootdir, args.date, 'pcr')
 
-        prefix = f'pcr_train_{args.n_train}_val_{args.n_val}'
+        prefix = f'pcr_rho_{args.rho}_train_{args.n_train}_val_{args.n_val}'
         savepath = os.path.join(savepath, prefix)
         os.makedirs(savepath, exist_ok=True)
         filename = os.path.join(savepath, f'{args.seed}.pkl')
