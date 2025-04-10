@@ -18,10 +18,10 @@ class ConditionerMLP(nn.Module):
                                          kernel_init=nn.initializers.variance_scaling(scale=0.1, mode="fan_in", distribution="normal"))(x))
         x = nn.Dense(
             2 * self.output_dim,
-            # kernel_init=nn.initializers.zeros_init(),
             kernel_init=nn.initializers.variance_scaling(scale=0.01, mode="fan_in", distribution="truncated_normal"),
             bias_init=nn.initializers.zeros_init())(x)
         return x
+
 
 class RealNVP(nn.Module):
     dim: int
@@ -29,18 +29,11 @@ class RealNVP(nn.Module):
     hidden_dims: Sequence[int]
 
     def setup(self):
-        """
-        Create:
-         - self.masks: an array of binary masks, one per layer
-         - self.conditioners: a list of MLP submodules, each with unique names
-        """
-        # 1) Build an alternating mask for each layer
         self.masks = [
             jnp.array([((i + j) % 2) == 0 for j in range(self.dim)], dtype=bool)
             for i in range(self.n_layers)
         ]
 
-        # 2) Create a ConditionerMLP submodule for each layer
         self.conditioners = [
             ConditionerMLP(
                 hidden_dims=self.hidden_dims, 
@@ -95,4 +88,3 @@ class RealNVP(nn.Module):
         logp = log_q + log_det
         logp = jnp.where(jnp.isinf(logp), jnp.nan, logp)
         return -jnp.nanmean(logp)
-
