@@ -2,7 +2,6 @@ import numpy as np
 import os
 import argparse
 import pickle
-import pandas as pd
 import jax
 from jax.scipy.stats import norm
 import jax.numpy as jnp
@@ -140,10 +139,7 @@ if __name__ == "__main__":
     parser.add_argument('--rho', type=float, default=.9)
     parser.add_argument('--n_train', type=int, default=2000)
     parser.add_argument('--n_val', type=int, default=1000)
-    parser.add_argument('--max_iter', type=int, default=3000)
-    parser.add_argument('--n_layers', type=int, default=8)
-    parser.add_argument('--hidden_dim', type=int, default=8)
-    parser.add_argument('--rootdir', type=str, default='/mnt/ceph/users/sliu1/transport_selinf/')
+    parser.add_argument('--rootdir', type=str, default='experiments/results')
     args = parser.parse_args()
 
     savepath = os.path.join(args.rootdir, args.date, 'pcr')

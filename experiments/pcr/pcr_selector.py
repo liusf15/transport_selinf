@@ -5,8 +5,9 @@ from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_sco
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 import statsmodels.api as sm
-from experiments.selector import Selector
 from scipy.special import expit as sigmoid
+
+from experiments.selector import Selector
 
 class PCRSelection(Selector):
     def __init__(self, X, y, n_fold=5):
@@ -52,7 +53,7 @@ class PCRSelection(Selector):
         ])
 
         param_grid = {
-            'pca__n_components': list(range(1, 5))  # trying 1 to 20 PCs
+            'pca__n_components': list(range(1, 5)) 
         }
 
         gridcv = GridSearchCV(pipe, param_grid, scoring='neg_log_loss', cv=cv)
@@ -74,7 +75,6 @@ class PCRSelection(Selector):
             return None
 
     def naive_inference(self, sig_level=0.05):
-        
         cis = self.logistic_model.conf_int(alpha=sig_level)[1:]
         pvalues = self.logistic_model.pvalues[1:]
         llr_pvalue = self.logistic_model.llr_pvalue
