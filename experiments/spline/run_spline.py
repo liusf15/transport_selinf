@@ -8,7 +8,6 @@ from sklearn.preprocessing import SplineTransformer, StandardScaler
 from experiments.spline.spline_selector import SplineSelection
 from flows.train import train_with_validation
 
-
 def generate_data(seed):
     rng = np.random.default_rng(seed)    
     return mu + rng.normal(size=(n,)) * sigma
@@ -43,7 +42,7 @@ def run(seed, n_train, n_val, n_fold=5):
         return pval, val_losses
     
     learning_rate = 1e-4
-    hidden_dims = [12]
+    hidden_dims = [8]
     flag = False
     for _seed in range(3):
         print("Training seed: ", _seed, "lr: ", learning_rate)
@@ -58,7 +57,6 @@ def run(seed, n_train, n_val, n_fold=5):
     
     if not flag:
         learning_rate = 1e-5
-        hidden_dims = [12]
         for _seed in range(3, 6):
             print("Training seed: ", _seed, "lr: ", learning_rate)
             pval, val_losses = train_and_inference(seed=_seed, max_iter=10000, learning_rate=learning_rate, hidden_dims=hidden_dims)
@@ -81,14 +79,14 @@ def run(seed, n_train, n_val, n_fold=5):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--date', type=str, default='20250403')
-    parser.add_argument('--n', type=int, default=50)
+    parser.add_argument('--n', type=int, default=100)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--signal_fac', type=float, default=1.)
-    parser.add_argument('--n_train', type=int, default=1000)
-    parser.add_argument('--n_val', type=int, default=1000)
+    parser.add_argument('--n_train', type=int, default=2000)
+    parser.add_argument('--n_val', type=int, default=500)
     parser.add_argument('--n_fold', type=int, default=10)
     parser.add_argument('--max_knots', type=int, default=5)
-    parser.add_argument('--rootdir', type=str, default='/mnt/ceph/users/sliu1/transport_selinf/')
+    parser.add_argument('--rootdir', type=str, default='experiments/results')
     args = parser.parse_args()
 
     n = args.n
