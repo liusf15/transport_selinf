@@ -55,14 +55,16 @@ def inference(model, params, beta_hat, Sigma, mean_shift, cov_chol, sig_level=0.
             @jax.jit
             def get_pvalue(beta_null_j):
                 logp = jax.vmap(logp_j, in_axes=(0, None))(grid, beta_null_j)
-                logp = jnp.nan_to_num(logp)
+                isnan = jnp.all(jnp.isnan(logp))
+                logp = jnp.nan_to_num(logp, nan=-np.inf)
                 logp -= logp.max()
                 log_normalization_const = logsumexp(logp)
 
                 idx_left = (grid <= beta_hat[j]) 
                 log_numerator_left = logsumexp(jnp.where(idx_left, logp, -jnp.inf))
                 pval = jnp.exp(log_numerator_left - log_normalization_const)
-                return jax.lax.select(pval < 0.5, 2 * pval, 2 * (1 - pval))
+                pval = jax.lax.select(pval < 0.5, 2 * pval, 2 * (1 - pval))
+                return jax.lax.select(isnan, 0., pval)
 
             pvalues[j] = get_pvalue(0.)
             if compute_ci:
@@ -71,7 +73,6 @@ def inference(model, params, beta_hat, Sigma, mean_shift, cov_chol, sig_level=0.
     if compute_ci:
         return  global_pval, pvalues, cis
     return global_pval, pvalues
-
 
 def generate_data(seed):
     rng = np.random.default_rng(seed)    
@@ -101,7 +102,6 @@ def run(seed, n_train, n_val=1000, hidden_dim=8):
     pvalues_all = {}
     intervals_all = {}
     global_pvalues_all = {}
-    # intervals_all['naive'] = pd.DataFrame({0: lower, 1: upper}, index=[f'x{i}' for i in range(1, d+1)])
     intervals_all['naive'] = np.stack([lower, upper]).T
     pvalues_all['naive'] = 2 * norm.cdf(-np.abs(beta_hat) / beta_sd)
     naive_zvalue = np.linalg.cholesky(np.linalg.inv(Sigma)).T @ beta_hat
@@ -109,7 +109,7 @@ def run(seed, n_train, n_val=1000, hidden_dim=8):
 
     print("Generating samples ...")
     rng = np.random.default_rng(0)
-    train_samples, train_contexts = selector.generate_training_data(rng, n_train+n_val, resample_scale=1., max_try=100)
+    train_samples, train_contexts = selector.generate_training_data(rng, n_train+n_val, max_try=100)
     print("Generated", train_samples.shape[0], 'samples')
 
     if train_samples.shape[0] == 0:
@@ -119,7 +119,6 @@ def run(seed, n_train, n_val=1000, hidden_dim=8):
     mean_shift = np.mean(train_samples, axis=0)
     cov_chol = np.linalg.cholesky(np.linalg.inv(np.atleast_2d(np.cov(train_samples.T))))
     samples_center = (train_samples - mean_shift) @ cov_chol
-
 
     val_samples = samples_center[n_train:]
     val_contexts = train_contexts[n_train:]
@@ -138,56 +137,6 @@ def run(seed, n_train, n_val=1000, hidden_dim=8):
         global_pvalues_all['nf'], pvalues_all['nf'] , intervals_all['nf'], val_losses = train_and_inference(seed=_seed)
         if (not np.isnan(pvalues_all['nf']).any()) and (not np.isinf(intervals_all['nf']).any()):
             break
-
-    # if d == 1:
-    #     model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-1, max_iter=max_iter, hidden_dims=[8], num_bins=20)
-    #     losses = np.array(losses)
-    #     if np.isnan(losses[-1]) or np.std(losses[-100:]) / np.mean(losses[-100:]) > 0.1:
-    #         print("Unstable training, try learning rate 1e-3")
-    #         model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-2, max_iter=max_iter)
-        
-    #     beta_hat_center = cov_chol.T @ (selector.beta_hat - mean_shift)
-    #     def get_pvalue(beta_null):
-    #         # z_value = model.inverse(params, beta_hat_center, np.array([beta_null]))[0]
-    #         z_value = model.apply(params, beta_hat_center, context=jnp.array([beta_null]), method=model.inverse)[0]
-    #         return 2 * norm.cdf(-np.abs(z_value))
-        
-    #     nf_ci = ci_bisection(get_pvalue, beta_sd[0], beta_hat[0] + 5 * beta_sd[0], beta_hat[0] - 5 * beta_sd[0], sig_level=sig_level, tol=1e-4)
-    #     if np.any(np.isinf(np.array(nf_ci))):
-    #         print("Got Inf, retraining with learning rate 1e-2")
-    #         model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-2, max_iter=max_iter, hidden_dims=[8], num_bins=20)
-    #         losses = np.array(losses)
-    #         nf_ci = ci_bisection(get_pvalue, beta_sd[0], beta_hat[0] + 5 * beta_sd[0], beta_hat[0] - 5 * beta_sd[0], sig_level=sig_level, tol=1e-4)
-
-    #     nf_ci = pd.DataFrame(np.array(nf_ci).reshape(1, 2), index=['x1'])
-    #     nf_pvalue = get_pvalue(0.)
-    # else:
-    #     def logdensity_fn(model, params, beta_hat, beta_null):
-    #         beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
-    #         # return -model.forward_kl(beta_hat_center_, params, beta_null)
-    #         return -model.apply(params, beta_hat_center_, beta_null, method=model.forward_kl)
-    #     # logdensity_fn = jax.jit(logdensity_fn, static_argnums=(0,))
-
-    #     def train_and_inference(learning_rate, max_iter, n_layers):
-    #         model, params, losses = train_nf(samples_center, contexts, learning_rate=learning_rate, max_iter=max_iter, hidden_dims=[2*d, 2*d], n_layers=n_layers)
-    #         losses = np.array(losses)
-    #         logp_fn = lambda beta_hat, beta_null: logdensity_fn(model, params, beta_hat, beta_null)
-    #         nf_pvalue, nf_ci = inference(logp_fn, beta_hat, Sigma, sig_level=sig_level, compute_ci=True)
-    #         nf_ci = pd.DataFrame(nf_ci, index=naive_ci.index)
-    #         return nf_ci, nf_pvalue, losses
-        
-    #     print("Training with learning rate 1e-3, iteration=2000, n_layers=8")
-    #     nf_ci, nf_pvalue, losses = train_and_inference(1e-4, 2000, 8)
-    #     if np.any(np.isinf(np.array(nf_ci))):
-    #         print("Got Inf, retraining with learning rate 1e-4, iteration=2000, n_layers=8")
-    #         nf_ci, nf_pvalue, losses = train_and_inference(1e-4, 3000, 8)
-    #         if np.any(np.isinf(np.array(nf_ci))):
-    #             print("Got Inf, retraining with learning rate 1e-3, iteration=2000, n_layers=12")
-    #             nf_ci, nf_pvalue, losses = train_and_inference(1e-3, 2000, 12)
-    #             if np.any(np.isinf(np.array(nf_ci))):
-    #                 print("Got Inf, retraining with learning rate 1e-4, iteration=3000, n_layers=12")
-    #                 nf_ci, nf_pvalue, losses = train_and_inference(1e-4, 3000, 12)
-
 
     coverages_all = {}
     for key, ci in intervals_all.items():
@@ -208,18 +157,13 @@ if __name__ == "__main__":
     parser.add_argument('--n_val', type=int, default=1000)
     parser.add_argument('--max_iter', type=int, default=1000)
     parser.add_argument('--hidden_dim', type=int, default=8)
-    parser.add_argument('--rootdir', type=str, default='/mnt/ceph/users/sliu1/transport_selinf/')
+    parser.add_argument('--rootdir', type=str, default='experiments/results')
     args = parser.parse_args()
 
     n = args.n
-    p = 4 #5
+    p = 4 
     sigma = 1.
     rng = np.random.default_rng(2025)
-    # beta = np.array([0., 0., 1., 2., -2.]) * args.signal_fac * np.sqrt(n)
-    # x = np.linspace(0, 2, n)
-    # if args.mixed_sign:
-    #     beta = np.array([0, 0, -1, 1]) * args.signal_fac * np.sqrt(n)
-    # else:
     beta = np.array([0, 0, 1, 1]) * args.signal_fac * np.sqrt(n)
 
     x = rng.normal(size=(n,))
