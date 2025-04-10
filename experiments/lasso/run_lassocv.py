@@ -9,7 +9,7 @@ from scipy.special import logsumexp
 
 from experiments.lasso.randomized_lasso import RandomLassoCV
 from experiments.lasso.regression_designs import gaussian_instance
-from flows.train import train_nf, train_with_validation
+from flows.train import train_with_validation
 from utils.utils import ci_bisection
 
 def inference(logdensity_fn, select_prob_fn, beta_hat, Sigma, compute_ci=True, sig_level=0.05):
@@ -34,14 +34,16 @@ def inference(logdensity_fn, select_prob_fn, beta_hat, Sigma, compute_ci=True, s
 
         def get_pvalue(beta_null_j):
             logp = jax.vmap(adjusted_logdensity, in_axes=(0, None))(grid, beta_null_j)
-            logp = jnp.nan_to_num(logp)
+            isnan = jnp.all(jnp.isnan(logp))
+            logp = jnp.nan_to_num(logp, nan=-np.inf)
             logp -= logp.max()
             log_normalization_const = logsumexp(logp, b=select_prob)
 
             idx_left = (grid <= beta_hat[j]) 
             log_numerator_left = logsumexp(logp[idx_left], b=select_prob[idx_left])
-            pval = np.exp(log_numerator_left - log_normalization_const)
-            return 2 * min(pval, 1 - pval)
+            pval = jnp.exp(log_numerator_left - log_normalization_const)
+            pval = jax.lax.select(pval < 0.5, 2 * pval, 2 * (1 - pval))
+            return jax.lax.select(isnan, 0., pval)
     
         pvalues[j] = get_pvalue(0.)
         if compute_ci:
@@ -104,7 +106,6 @@ def run(seed, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, savepath=N
     train_contexts = train_contexts[:n_train]
 
     def train_and_inference(seed):
-        # model, params, losses = train_nf(samples_center, contexts, learning_rate=1e-4, max_iter=max_iter, hidden_dims=[hidden_dim], n_layers=n_layers)
         model, params, val_losses = train_with_validation(train_samples, train_contexts, val_samples, val_contexts, learning_rate=1e-4, max_iter=10000, checkpoint_every=1000, hidden_dims=[hidden_dim], n_layers=12, num_bins=20, seed=seed)
         val_losses = np.array(val_losses)
         def neg_loglik_adjusted(beta_hat, beta_null):
@@ -112,45 +113,13 @@ def run(seed, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, savepath=N
             return model.apply(params, beta_hat_center_, beta_null, method=model.forward_kl)
         pval, ci = rl.adjusted_inference(neg_loglik_adjusted, compute_ci=True, sig_level=sig_level)
         return pval, ci, val_losses
-    
-    
-    # losses = {}
-    # print(f"Training with learning rate 1e-4, iteration=4000, n_layers=12")
-    # max_iter = 4000
+
     for _seed in range(10):
         print("Training seed: ", _seed)
         pvalues_all[f'adjusted'] , intervals_all[f'adjusted'], val_losses = train_and_inference(seed=_seed)
         if (not np.isnan(pvalues_all[f'adjusted']).any()) and (not np.isinf(intervals_all[f'adjusted']).any()):
             break
-    # pvalues_all[f'adjusted_{max_iter}'] = nf_pvalue
-    # intervals_all[f'adjusted_{max_iter}'] = nf_ci
-    # losses[f'{max_iter}'] = loss
 
-    # if np.isnan(nf_pvalue).any() or np.isinf(nf_ci).any():
-    #     print("Training with learning rate 1e-4, iteration=8000, n_layers=12")
-    #     max_iter = 8000
-    #     nf_pvalue, nf_ci, loss = train_and_inference(max_iter, 12)
-    #     pvalues_all[f'adjusted_{max_iter}'] = nf_pvalue
-    #     intervals_all[f'adjusted_{max_iter}'] = nf_ci
-    #     losses[f'{max_iter}'] = loss
-
-    #     if np.isnan(nf_pvalue).any() or np.isinf(nf_ci).any():
-    #         print("Training with learning rate 1e-4, iteration=2000, n_layers=12")
-    #         max_iter = 2000
-    #         nf_pvalue, nf_ci, loss = train_and_inference(max_iter, 12)
-    #         pvalues_all[f'adjusted_{max_iter}'] = nf_pvalue
-    #         intervals_all[f'adjusted_{max_iter}'] = nf_ci
-    #         losses[f'{max_iter}'] = loss
-
-    #         if np.isnan(nf_pvalue).any() or np.isinf(nf_ci).any():
-    #             max_iter = 1000
-    #             print("Training with learning rate 1e-4, iteration=1000, n_layers=12")
-    #             nf_pvalue, nf_ci, loss = train_and_inference(max_iter, 12)
-    #             pvalues_all[f'adjusted_{max_iter}'] = nf_pvalue
-    #             intervals_all[f'adjusted_{max_iter}'] = nf_ci
-    #             losses[f'{max_iter}'] = loss
-    
-    
     print(pvalues_all)
     print(intervals_all)
 
@@ -184,7 +153,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_iter', type=int, default=3000)
     parser.add_argument('--n_layers', type=int, default=8)
     parser.add_argument('--hidden_dim', type=int, default=8)
-    parser.add_argument('--rootdir', type=str, default='/mnt/ceph/users/sliu1/transport_selinf/')
+    parser.add_argument('--rootdir', type=str, default='experiments/results')
     args = parser.parse_args()
 
     savepath = os.path.join(args.rootdir, args.date, 'lassocv')
