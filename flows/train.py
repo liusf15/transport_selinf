@@ -41,6 +41,7 @@ def train_nf(samples, contexts, learning_rate, max_iter, hidden_dims=[32, 32], n
     params, losses = train(model, params, samples, contexts, learning_rate=learning_rate, max_iter=max_iter)
     return model, params, losses
 
+
 def train_with_validation(train_samples, train_contexts, val_samples, val_contexts, learning_rate, max_iter=5000, checkpoint_every=1000, hidden_dims=[8], n_layers=12, num_bins=20, seed=0):
 
     d = train_samples.shape[1]
