@@ -70,13 +70,19 @@ class RandomLasso(Selector):
         scaled_w = self.s_E * (Sigma_ @ self.w[self.E])
         D = np.diag(self.s_E)
         scaled_w_var = self.nu**2 * D @ Sigma_ @ D
-        mask_j = np.ones(self.d, dtype=bool)
-        mask_j[j] = False
-        cond_var = scaled_w_var[j, j] - scaled_w_var[j, mask_j] @ np.linalg.inv(scaled_w_var[mask_j][:, mask_j]) @ scaled_w_var[mask_j, j]
-        cond_mean = scaled_w_var[j, mask_j] @ np.linalg.inv(scaled_w_var[mask_j][:, mask_j]) @ scaled_w[mask_j] 
-        sel_prob = norm.cdf((self.s_E[j] * np.atleast_2d(beta_hat)[:, j] - scaled_s[j]), loc=cond_mean, scale=np.sqrt(cond_var))
-        indi = np.all((beta_hat[:, mask_j] - scaled_s[mask_j] - scaled_w[mask_j]) * self.s_E[mask_j] > 0, axis=1) * 1.
-        return sel_prob * indi
+
+        eta = np.eye(self.d)[j]
+        w_var_j = np.dot(eta, scaled_w_var @ eta)
+        c = scaled_w_var @ eta / w_var_j
+        w_perp = scaled_w - c * scaled_w[j]
+        
+        beta_hat = np.atleast_2d(beta_hat)
+        sel_probs = np.zeros(beta_hat.shape[0])
+        for i in range(beta_hat.shape[0]):
+            b = self.s_E * beta_hat[i] - scaled_s
+            lb, ub = self.get_hard_threshold(-c, -(b - w_perp))
+            sel_probs[i] = norm.cdf(ub / np.sqrt(w_var_j)) - norm.cdf(lb / np.sqrt(w_var_j))
+        return sel_probs
     
     def select_prob_sov(self, beta_hat, _):
         Sigma_ = np.linalg.inv(self.X_E.T @ self.X_E)
@@ -124,6 +130,9 @@ class RandomLasso(Selector):
         return pvals, np.stack([lower, upper]).T
     
     def get_hard_threshold(self, a, b):
+        """
+        get intervals x \in [lb, ub] that corresponds to a * x - b > 0
+        """
         zero_idx = a == 0
         if sum(zero_idx) and b[zero_idx] < 0:
             return None
