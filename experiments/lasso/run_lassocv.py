@@ -4,65 +4,21 @@ import os
 import pickle
 from jax.scipy.stats import multivariate_normal as mvn
 import jax
-import jax.numpy as jnp 
-from scipy.special import logsumexp
 
 from experiments.lasso.randomized_lasso import RandomLassoCV
 from experiments.lasso.regression_designs import gaussian_instance
 from flows.train import train_with_validation
-from utils.utils import ci_bisection
 
-def inference(logdensity_fn, select_prob_fn, beta_hat, Sigma, compute_ci=True, sig_level=0.05):
-    d = len(beta_hat)
-    pvalues = np.zeros(d)
-    cis = np.zeros((d, 2))
-    for j in range(d):
-        eta = np.eye(d)[j]
-        c = Sigma @ eta / (np.dot(eta, Sigma @ eta))
-        beta_perp = beta_hat - c * beta_hat[j]
-        gridsize = 100
-        sd_j = np.sqrt(Sigma[j, j])
-        grid = jnp.linspace(-10, 10, gridsize) * sd_j + beta_hat[j]
-        grids = np.outer(grid, c) + beta_perp
-        select_prob = select_prob_fn(grids, j)
-
-        @jax.jit
-        def adjusted_logdensity(beta_hat_j, beta_null_j):
-            beta_ = jnp.zeros(d)
-            beta_ = beta_.at[j].set(beta_null_j)
-            return logdensity_fn(beta_perp + c * beta_hat_j, beta_)
-
-        def get_pvalue(beta_null_j):
-            logp = jax.vmap(adjusted_logdensity, in_axes=(0, None))(grid, beta_null_j)
-            isnan = jnp.all(jnp.isnan(logp))
-            logp = jnp.nan_to_num(logp, nan=-np.inf)
-            logp -= logp.max()
-            log_normalization_const = logsumexp(logp, b=select_prob)
-
-            idx_left = (grid <= beta_hat[j]) 
-            log_numerator_left = logsumexp(logp[idx_left], b=select_prob[idx_left])
-            pval = jnp.exp(log_numerator_left - log_normalization_const)
-            pval = jax.lax.select(pval < 0.5, 2 * pval, 2 * (1 - pval))
-            return jax.lax.select(isnan, 0., pval)
-    
-        pvalues[j] = get_pvalue(0.)
-        if compute_ci:
-            cis[j] = ci_bisection(get_pvalue, sd_j, beta_hat[j] + 5 * sd_j, beta_hat[j] - 5 * sd_j, sig_level=sig_level, tol=1e-4)
-    if compute_ci:
-        return pvalues, cis
-    return pvalues
-
-def run(seed, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, savepath=None):
+def run(seed, p, s, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, savepath=None):
     n = 100
-    p = 5
-    s = 0
     sigma = 1.
     signal = np.sqrt(signal_fac * 2 * np.log(p))
     equi = False
     random_signs = False
     rng = np.random.default_rng(seed)
     X, y, beta = gaussian_instance(rng, n, p, s, sigma, rho, signal, random_signs=random_signs, scale=True, center=True, equicorrelated=equi)
-    w = nu * X.T @ rng.normal(size=(n, ))
+    w_y = nu * rng.normal(size=(n,))
+    w = X.T @ w_y
 
     alphas = np.logspace(-2, np.log10(5), 10) * np.sqrt(np.log(p)) / n
     rl = RandomLassoCV(X, y, sigma, alphas, nu=nu, w=w, nfold=10)
@@ -76,17 +32,24 @@ def run(seed, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, savepath=N
     pvalues_all = {}
 
     beta_target = np.linalg.pinv(rl.X_E) @ X @ beta
-    beta_sd = np.sqrt(np.diag(rl.Sigma))
 
-    result_mle = rl.mle_inference(w=w, sig_level=sig_level)
-    intervals_all['mle'] = np.array([result_mle['lower_confidence'], result_mle['upper_confidence']]).T
-    pvalues_all['mle'] = np.array(result_mle['pvalue'])
     pvalues_all['naive'], intervals_all['naive'] = rl.naive_inference(sig_level=sig_level)
+
+    if nu > 0:
+        y_indep = y - w_y * (sigma**2 / nu**2)
+        pvalues_all['splitting'], intervals_all['splitting'] = rl.splitting_inference(y_indep, sig_level=sig_level)
 
     def neg_loglik(beta_hat, beta_null):
         return -mvn.logpdf(beta_hat, mean=beta_null, cov=rl.Sigma)
     
-    pvalues_all['preselect'], intervals_all['preselect'] = rl.adjusted_inference(neg_loglik, compute_ci=True, sig_level=sig_level)
+    # unadjusted
+    if nu > 0:
+        methods = ['hard_threshold', 'bivnormal', 'sov']
+    else:
+        methods = ['hard_threshold']
+    for method in methods:
+        print(method)
+        pvalues_all[method], intervals_all[method] = rl.adjusted_inference(neg_loglik, method_sel_prob=method, compute_ci=True, sig_level=sig_level)
 
     print("Generating samples ...")
     train_samples, train_contexts = rl.generate_training_data(rng, n_train+n_val, resample_scale=1., max_try=100)
@@ -105,20 +68,32 @@ def run(seed, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, savepath=N
     train_samples = samples_center[:n_train]
     train_contexts = train_contexts[:n_train]
 
-    def train_and_inference(seed):
-        model, params, val_losses = train_with_validation(train_samples, train_contexts, val_samples, val_contexts, learning_rate=1e-4, max_iter=10000, checkpoint_every=1000, hidden_dims=[hidden_dim], n_layers=12, num_bins=20, seed=seed)
-        val_losses = np.array(val_losses)
-        def neg_loglik_adjusted(beta_hat, beta_null):
-            beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
-            return model.apply(params, beta_hat_center_, beta_null, method=model.forward_kl)
-        pval, ci = rl.adjusted_inference(neg_loglik_adjusted, compute_ci=True, sig_level=sig_level)
-        return pval, ci, val_losses
+    def train():
+        for _seed in range(10):
+            model, params, val_losses = train_with_validation(train_samples, train_contexts, val_samples, val_contexts, learning_rate=1e-4, max_iter=10000, checkpoint_every=1000, hidden_dims=[hidden_dim], n_layers=12, num_bins=20, seed=_seed)
+            val_losses = np.array(val_losses)
 
-    for _seed in range(10):
-        print("Training seed: ", _seed)
-        pvalues_all[f'adjusted'] , intervals_all[f'adjusted'], val_losses = train_and_inference(seed=_seed)
-        if (not np.isnan(pvalues_all[f'adjusted']).any()) and (not np.isinf(intervals_all[f'adjusted']).any()):
-            break
+            def neg_loglik_adjusted(beta_hat, beta_null):
+                beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
+                return model.apply(params, beta_hat_center_, beta_null, method=model.forward_kl)
+
+            pval, ci = rl.adjusted_inference(neg_loglik_adjusted, method_sel_prob='hard_threshold', compute_ci=True, sig_level=sig_level)
+
+            if (not np.isnan(pval).any()) and (not np.isinf(ci).any()):
+                return model, params
+            print("NaN or Inf in validation loss, retrying with new seed")
+        return model, params
+
+    model, params = train()
+
+    @jax.jit
+    def neg_loglik_adjusted(beta_hat, beta_null):
+        beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
+        return model.apply(params, beta_hat_center_, beta_null, method=model.forward_kl)
+    
+    for method in methods:
+        print("adjusted", method)
+        pvalues_all['adjusted_' + method], intervals_all['adjusted_' + method] = rl.adjusted_inference(neg_loglik_adjusted, method_sel_prob=method, compute_ci=True, sig_level=sig_level)
 
     print(pvalues_all)
     print(intervals_all)
@@ -131,9 +106,9 @@ def run(seed, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, savepath=N
     print(false_rejects_all)
     print(coverages_all)
     
-    results_all = {'pvalues': pvalues_all, 'intervals': intervals_all, 'false_rejects': false_rejects_all, 'coverages': coverages_all, 'losses': val_losses}
+    results_all = {'pvalues': pvalues_all, 'intervals': intervals_all, 'false_rejects': false_rejects_all, 'coverages': coverages_all}
     if savepath is not None:
-        prefix = f'lassocv_{n}_{p}_{s}_{nu}_{signal_fac}_rho_{rho}_train_{n_train}_val_{n_val}_hidden_{hidden_dim}'
+        prefix = f'lassocv_{n}_{p}_{s}_{round(nu, 3)}_{signal_fac}_rho_{rho}_train_{n_train}_val_{n_val}_hidden_{hidden_dim}'
         path = os.path.join(savepath, prefix)
         os.makedirs(path, exist_ok=True)
         filename = os.path.join(path, f'{seed}.pkl')
@@ -144,9 +119,11 @@ def run(seed, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, savepath=N
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='cv rlasso')
     parser.add_argument('--date', type=str, default='20250221')
+    parser.add_argument('--p', type=int, default=20)
+    parser.add_argument('--s', type=int, default=5)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--signal_fac', type=float, default=.6)
-    parser.add_argument('--nu', type=float, default=.3)
+    parser.add_argument('--nu_sq', type=float, default=.1)
     parser.add_argument('--rho', type=float, default=.5)
     parser.add_argument('--n_train', type=int, default=2000)
     parser.add_argument('--n_val', type=int, default=1000)
@@ -157,5 +134,5 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     savepath = os.path.join(args.rootdir, args.date, 'lassocv')
-
-    run(seed=args.seed, signal_fac=args.signal_fac, nu=args.nu, rho=args.rho, n_train=args.n_train, n_val=args.n_val, hidden_dim=args.hidden_dim, savepath=savepath)
+    nu = np.sqrt(args.nu_sq)
+    run(p=args.p, s=args.s, seed=args.seed, signal_fac=args.signal_fac, nu=nu, rho=args.rho, n_train=args.n_train, n_val=args.n_val, hidden_dim=args.hidden_dim, savepath=savepath)

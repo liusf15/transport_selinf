@@ -129,6 +129,19 @@ class RandomLasso(Selector):
             pvals = 2 * ndtr(-abs((self.beta_hat - beta) / sd))
         return pvals, np.stack([lower, upper]).T
     
+    def splitting_inference(self, y_indep, sig_level=0.05, beta=None):
+        beta_hat_indep = np.linalg.pinv(self.X_E) @ y_indep
+        Sigma_indep = self.Sigma * (1 + self.sigma**2 / self.nu**2)
+        sd = np.sqrt(np.diag(Sigma_indep))
+        q = ndtri(sig_level / 2)
+        lower = beta_hat_indep + q * sd
+        upper = beta_hat_indep - q * sd
+        if beta is None:
+            pvals = 2 * ndtr(-abs(beta_hat_indep / sd))
+        else:
+            pvals = 2 * ndtr(-abs((beta_hat_indep - beta) / sd))
+        return pvals, np.stack([lower, upper]).T
+    
     def get_hard_threshold(self, a, b):
         """
         get intervals x \in [lb, ub] that corresponds to a * x - b > 0
@@ -148,14 +161,14 @@ class RandomLasso(Selector):
             ub = np.inf
         return lb, ub
 
-    def adjusted_inference(self, neg_loglik, compute_ci=False, sig_level=0.05):
+    def adjusted_inference(self, neg_loglik, method_sel_prob, compute_ci=False, sig_level=0.05):
         d = self.d
         Sigma = self.Sigma
         beta_sd = np.sqrt(np.diag(Sigma))
         beta_hat = self.beta_hat
         cis = np.zeros((d, 2))
         pvalues = np.zeros(d)
-        if self.nu == 0:
+        if method_sel_prob == 'hard_threshold':
             for j in range(d):
                 eta = np.eye(d)[j]
                 c = Sigma @ eta / np.dot(eta, Sigma @ eta)
@@ -206,11 +219,15 @@ class RandomLasso(Selector):
                 eta = np.eye(d)[j]
                 c = Sigma @ eta / (np.dot(eta, Sigma @ eta))
                 beta_perp = beta_hat - c * beta_hat[j]
-                gridsize = 200
                 sd_j = np.sqrt(Sigma[j, j])
-                grid = jnp.linspace(-10, 10, gridsize) * sd_j + beta_hat[j]
+                grid = jnp.linspace(-10, 10, 200) * sd_j + beta_hat[j]
                 grids = np.outer(grid, c) + beta_perp
-                select_prob = self.select_prob_sov(grids, j)
+                if method_sel_prob == 'sov':
+                    select_prob = self.select_prob_sov(grids, j)
+                elif method_sel_prob == 'bivnormal':
+                    select_prob = self.select_prob_bivnormal(grids, j)
+                else:
+                    raise NotImplementedError
 
                 def logp_j(beta_hat_j, beta_null_j):
                     beta_ = np.zeros(d)
