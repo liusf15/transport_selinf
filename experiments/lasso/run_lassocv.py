@@ -17,11 +17,10 @@ def run(seed, p, s, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, save
     random_signs = False
     rng = np.random.default_rng(seed)
     X, y, beta = gaussian_instance(rng, n, p, s, sigma, rho, signal, random_signs=random_signs, scale=True, center=True, equicorrelated=equi)
-    w_y = nu * rng.normal(size=(n,))
-    w = X.T @ w_y
+    y_perturb = nu * rng.normal(size=(n,))
 
     alphas = np.logspace(-2, np.log10(5), 10) * np.sqrt(np.log(p)) / n
-    rl = RandomLassoCV(X, y, sigma, alphas, nu=nu, w=w, nfold=10)
+    rl = RandomLassoCV(X, y, sigma, alphas, nfold=10, nu=nu, y_perturb=y_perturb)
     d = rl.d
     print("selected", d, "variables")
     if d == 0:
@@ -36,8 +35,8 @@ def run(seed, p, s, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, save
     pvalues_all['naive'], intervals_all['naive'] = rl.naive_inference(sig_level=sig_level)
 
     if nu > 0:
-        y_indep = y - w_y * (sigma**2 / nu**2)
-        pvalues_all['splitting'], intervals_all['splitting'] = rl.splitting_inference(y_indep, sig_level=sig_level)
+        # y_indep = y - w_y * (sigma**2 / nu**2)
+        pvalues_all['splitting'], intervals_all['splitting'] = rl.splitting_inference(sig_level=sig_level)
 
     def neg_loglik(beta_hat, beta_null):
         return -mvn.logpdf(beta_hat, mean=beta_null, cov=rl.Sigma)
@@ -77,7 +76,7 @@ def run(seed, p, s, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, save
                 beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
                 return model.apply(params, beta_hat_center_, beta_null, method=model.forward_kl)
 
-            pval, ci = rl.adjusted_inference(neg_loglik_adjusted, method_sel_prob='hard_threshold', compute_ci=True, sig_level=sig_level)
+            pval, ci = rl.adjusted_inference(neg_loglik_adjusted, method_sel_prob='bivnormal', compute_ci=True, sig_level=sig_level)
 
             if (not np.isnan(pval).any()) and (not np.isinf(ci).any()):
                 return model, params

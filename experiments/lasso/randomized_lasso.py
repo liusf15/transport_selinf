@@ -1,11 +1,10 @@
 import numpy as np
 from scipy.special import ndtri, ndtr
-from sklearn.linear_model import LassoCV
+from sklearn.linear_model import LassoCV, Lasso
 from scipy.stats import norm
 import jax
 import jax.numpy as jnp
 from jax.scipy.special import logsumexp
-import regreg.api as rr
 from selectinf.algorithms import lasso
 from selectinf.randomized.lasso import lasso
 from selectinf.base import selected_targets, full_targets
@@ -15,7 +14,7 @@ from utils.utils import ci_bisection
 from experiments.selector import Selector
 
 class RandomLasso(Selector):
-    def __init__(self, X, y, sigma, lbd, nu=0., w=None) -> None:
+    def __init__(self, X, y, sigma, lbd, nu=0., y_perturb=None) -> None:
         self.X = X
         self.y = y
         self.n, self.p = X.shape
@@ -23,12 +22,14 @@ class RandomLasso(Selector):
         self.lbd = lbd
 
         self.nu = nu
-        if w is None:
+        if y_perturb is None:
+            self.y_perturb = np.zeros(self.n)
             self.w = np.zeros(self.p)
         else:
-            self.w = w
+            self.y_perturb = y_perturb
+            self.w = X.T @ y_perturb
 
-        self.beta_sol = self.solve_lasso(y, w, self.lbd)
+        self.beta_sol = self.solve_lasso(y, self.y_perturb, self.lbd)
         E = abs(self.beta_sol) > 1e-10
         self.s_E = np.sign(self.beta_sol[E])
         self.E = E
@@ -42,20 +43,27 @@ class RandomLasso(Selector):
         self.K_E[:, E] = (self.X[:, np.logical_not(E)].T @ self.X[:, E]) @ np.linalg.inv(self.X[:, E].T @ self.X[:, E])
         self.K_E[:, np.logical_not(E)] = -np.eye(self.p - self.d)
         self.KX = self.K_E @ X.T
-        self.u_obs = self.KX @ y
         self.proj_y = self.KX.T @ np.linalg.inv(self.KX @ self.KX.T)
+        self.A1_obs = self.KX @ y
+        self.A2_obs = self.KX @ self.y_perturb
 
-    def solve_lasso(self, y, w, lbd=None):
+    def solve_lasso(self, y, y_perturb, lbd=None):
+        # if lbd is None:
+        #     l1_norm = rr.weighted_l1norm([self.lbd] * self.p, lagrange=1.)
+        # else:
+        #     l1_norm = rr.weighted_l1norm([lbd] * self.p, lagrange=1.)
+        # quad = rr.identity_quadratic(coef=0, center=0, linear_term=self.w)
+        # loglike = rr.glm.gaussian(self.X, y, coef=1)
+        # problem = rr.simple_problem(loglike, l1_norm)
+        # solve_args={'tol': 1.e-12, 'min_its': 50}
+        # beta_sol = problem.solve(quadratic=quad, **solve_args)
+        # return beta_sol
+        # debug
         if lbd is None:
-            l1_norm = rr.weighted_l1norm([self.lbd] * self.p, lagrange=1.)
-        else:
-            l1_norm = rr.weighted_l1norm([lbd] * self.p, lagrange=1.)
-        quad = rr.identity_quadratic(coef=0, center=0, linear_term=w)
-        loglike = rr.glm.gaussian(self.X, y, coef=1)
-        problem = rr.simple_problem(loglike, l1_norm)
-        solve_args={'tol': 1.e-12, 'min_its': 50}
-        beta_sol = problem.solve(quadratic=quad, **solve_args)
-        return beta_sol
+            lbd = self.lbd
+        return Lasso(alpha=lbd/self.n, fit_intercept=False).fit(self.X, y - y_perturb).coef_
+        # assert np.allclose(beta_sol, beta_sol2), f"beta_sol: {beta_sol}, beta_sol2: {beta_sol2}"
+        # return beta_sol
 
     def select_prob_hard_threshold(self, beta_hat, _):
         Sigma_ = np.linalg.inv(self.X_E.T @ self.X_E)
@@ -129,7 +137,8 @@ class RandomLasso(Selector):
             pvals = 2 * ndtr(-abs((self.beta_hat - beta) / sd))
         return pvals, np.stack([lower, upper]).T
     
-    def splitting_inference(self, y_indep, sig_level=0.05, beta=None):
+    def splitting_inference(self, sig_level=0.05, beta=None):
+        y_indep = self.y + self.y_perturb * (self.sigma**2 / self.nu**2)
         beta_hat_indep = np.linalg.pinv(self.X_E) @ y_indep
         Sigma_indep = self.Sigma * (1 + self.sigma**2 / self.nu**2)
         sd = np.sqrt(np.diag(Sigma_indep))
@@ -175,7 +184,7 @@ class RandomLasso(Selector):
                 theta_hat = eta.dot(beta_hat)
                 beta_perp = beta_hat - c * theta_hat
                 a = c * self.s_E
-                b = -(beta_perp - self.lbd * np.linalg.inv(self.X_E.T @ self.X_E) @ self.s_E) * self.s_E
+                b = -(beta_perp - np.linalg.inv(self.X_E.T @ self.X_E) @ (self.lbd * self.s_E + self.w[self.E])) * self.s_E
                 lb, ub = self.get_hard_threshold(a, b)
                 lb_finite = lb
                 ub_finite = ub
@@ -253,33 +262,37 @@ class RandomLasso(Selector):
             return pvalues, cis
         return pvalues
 
-    
 class RandomLassoCV(RandomLasso):
-    def __init__(self, X, y, sigma, alphas, nfold=10, nu=0., w=None):
+    def __init__(self, X, y, sigma, alphas, nfold=10, nu=0., y_perturb=None):
         self.X = X
         self.y = y
         self.n, self.p = X.shape
         self.sigma = sigma
         self.alphas = alphas
         self.nfold = nfold
-        self.nu = nu        
-        self.alpha = self.select_lambda(y)
+        self.nu = nu
+        if y_perturb is None:
+            self.y_perturb = np.zeros(self.n)
+        else:
+            self.y_perturb = y_perturb
+        self.alpha = self.select_lambda(y - y_perturb)
         self.lbd = self.alpha * self.n
 
-        super().__init__(X, y, sigma, lbd=self.lbd, nu=self.nu, w=w)
+        super().__init__(X, y, sigma, lbd=self.lbd, nu=self.nu, y_perturb=y_perturb)
 
     def select_lambda(self, y):
         lasso_cv = LassoCV(alphas=self.alphas, fit_intercept=False, n_jobs=-1, cv=self.nfold, random_state=0)
         lasso_cv.fit(self.X, y)
         return lasso_cv.alpha_ 
 
-    def select(self, y):
-        return self.select_lambda(y)
-
     def _resample(self, rng, beta_null):
         y = self.X_E @ beta_null + rng.normal(size=(self.n, )) * self.sigma
-        y = y - self.proj_y @ (self.KX @ y - self.u_obs)
-        alpha_hat = self.select_lambda(y)
+        y = y - self.proj_y @ (self.KX @ y - self.A1_obs)
+
+        y_perturb = self.nu * rng.normal(size=(self.n, ))
+        y_perturb = y_perturb - self.proj_y @ (self.KX @ y_perturb - self.A2_obs)
+
+        alpha_hat = self.select_lambda(y - y_perturb)
         if np.abs((alpha_hat - self.alpha) / self.alpha) <= 1e-2:
             return np.linalg.pinv(self.X_E) @ y
         else:
