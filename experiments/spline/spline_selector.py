@@ -10,15 +10,20 @@ from tqdm import tqdm
 from experiments.selector import Selector
 
 class SplineSelection(Selector):
-    def __init__(self, x, y, sigma=1., maximum_knots=5, n_fold=10, scale=False):
+    def __init__(self, x, y, sigma=1., maximum_knots=5, n_fold=10, scale=False, nu=0., y_perturb=None):
         self.x = x
         self.y = y
         self.sigma = sigma
+        self.nu = nu
         self.maximum_knots = maximum_knots  
         self.n_fold = n_fold
         self.n = x.shape[0]
-
-        self.n_knots = self.select(y)
+        if y_perturb is None:
+            self.y_perturb = np.zeros(y.shape)
+        else:
+            self.y_perturb = y_perturb
+        
+        self.n_knots = self.select(y + self.y_perturb)
         spline_transformer = SplineTransformer(n_knots=self.n_knots, include_bias=False)
         X_basis = spline_transformer.fit_transform(x)
         if scale:
@@ -48,7 +53,8 @@ class SplineSelection(Selector):
 
     def _resample(self, rng, beta_null):
         y = self.X[:, 1:] @ beta_null + self.intercept + rng.normal(size=(self.n, )) * self.sigma
-        n_knots = self.select(y)
+        y_perturb = rng.normal(size=(self.n, )) * self.nu
+        n_knots = self.select(y + y_perturb)
         if n_knots == self.n_knots:
             selected_model = sm.OLS(y, self.X).fit()
             return selected_model.params[1:]
@@ -58,6 +64,13 @@ class SplineSelection(Selector):
     def naive_F_test(self):
         const_model = sm.OLS(self.y, np.ones((self.n, 1))).fit()
         _, F_pval, _ = self.selected_model.compare_f_test(const_model)
+        return F_pval
+    
+    def splitting_F_test(self):
+        y_indep = self.y - self.y_perturb * (self.sigma**2 / self.nu**2)
+        null_model = sm.OLS(y_indep, np.ones((self.n, 1))).fit()
+        alt_model = sm.OLS(y_indep, self.X).fit()
+        _, F_pval, _ = alt_model.compare_f_test(null_model)
         return F_pval
 
     def sample_from_global_null(self, rng, n_train):

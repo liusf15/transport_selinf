@@ -8,16 +8,21 @@ from sklearn.preprocessing import SplineTransformer, StandardScaler
 from experiments.spline.spline_selector import SplineSelection
 from flows.train import train_with_validation
 
-def generate_data(seed):
+def generate_data(seed, nu):
     rng = np.random.default_rng(seed)    
-    return mu + rng.normal(size=(n,)) * sigma
+    y = mu + rng.normal(size=(n,)) * sigma
+    y_perturb = rng.normal(size=(n,)) * nu
+    return y, y_perturb
 
-def run(seed, n_train, n_val, n_fold=5):
-    y = generate_data(seed)
+def run(seed, n_train, n_val, n_fold=5, nu_sq=0.):
+    nu = np.sqrt(nu_sq)
+    y, y_perturb = generate_data(seed, nu)
 
-    selector = SplineSelection(x, y, sigma, n_fold=n_fold, scale=True)
+    selector = SplineSelection(x, y, sigma, n_fold=n_fold, scale=True, nu=nu, y_perturb=y_perturb)
     d = selector.d
     naive_pval = selector.naive_F_test()
+    if nu > 0:
+        splitting_pval = selector.splitting_F_test()
 
     print("Generating samples ...")
     rng = np.random.default_rng(0)
@@ -72,7 +77,7 @@ def run(seed, n_train, n_val, n_fold=5):
         print("Training failed, setting pvalue to 2")
         pval = 2.
 
-    pvalues_all = {'naive': naive_pval, 'adjusted': pval}
+    pvalues_all = {'naive': naive_pval, 'splitting': splitting_pval, 'adjusted': pval}
     print(pvalues_all)
     return pvalues_all
 
@@ -86,6 +91,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_val', type=int, default=500)
     parser.add_argument('--n_fold', type=int, default=10)
     parser.add_argument('--max_knots', type=int, default=5)
+    parser.add_argument('--nu_sq', type=float, default=0.)
     parser.add_argument('--rootdir', type=str, default='experiments/results')
     args = parser.parse_args()
 
@@ -102,10 +108,10 @@ if __name__ == "__main__":
     snr = np.sqrt(np.var(mu) / sigma**2)
 
     seed = args.seed
-    results = run(args.seed, n_train=args.n_train, n_val=args.n_val, n_fold=args.n_fold)
+    results = run(args.seed, n_train=args.n_train, n_val=args.n_val, n_fold=args.n_fold, nu_sq=args.nu_sq)
     if results is not None:
         savepath = os.path.join(args.rootdir, args.date, 'spline')
-        prefix = f'spline_{n}_signal_{args.signal_fac}_train_{args.n_train}_val_{args.n_val}_maxknots_{args.max_knots}_cv_{args.n_fold}'
+        prefix = f'spline_{n}_signal_{args.signal_fac}_nusq_{args.nu_sq}_train_{args.n_train}_val_{args.n_val}_maxknots_{args.max_knots}_cv_{args.n_fold}'
         path = os.path.join(savepath, prefix)
         os.makedirs(path, exist_ok=True)
         filename = os.path.join(path, f'{seed}.csv')

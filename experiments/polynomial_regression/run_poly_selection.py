@@ -1,6 +1,5 @@
 import numpy as np
-import pandas as pd
-from scipy.stats import norm, chi2
+from scipy.stats import norm
 import argparse
 import pickle
 import os
@@ -26,13 +25,10 @@ def inference(model, params, beta_hat, Sigma, mean_shift, cov_chol, sig_level=0.
             z_value = model.apply(params, beta_hat_center, context=jnp.array([beta_null]), method=model.inverse)[0]
             return 2 * norm.cdf(-np.abs(z_value))
         pvalues[0] = get_pvalue(0.)
-        global_pval = pvalues[0]
         if compute_ci:
             cis[0] = ci_bisection(get_pvalue, beta_sd[0], beta_hat[0] + 5 * beta_sd[0], beta_hat[0] - 5 * beta_sd[0], sig_level=sig_level, tol=1e-4)
     else:
         beta_hat_center = cov_chol.T @ (beta_hat - mean_shift)
-        z_value = model.apply(params, beta_hat_center, context=jnp.zeros(d), method=model.inverse)[0]
-        global_pval = 1 - chi2.cdf(np.sum(z_value**2), df=d)
 
         def neg_loglik(beta_hat, beta_null):
             beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
@@ -69,21 +65,20 @@ def inference(model, params, beta_hat, Sigma, mean_shift, cov_chol, sig_level=0.
             pvalues[j] = get_pvalue(0.)
             if compute_ci:
                 cis[j] = ci_bisection(get_pvalue, sd_j, beta_hat[j] + 5 * sd_j, beta_hat[j] - 5 * sd_j, sig_level=sig_level, tol=1e-4)
-
     if compute_ci:
-        return  global_pval, pvalues, cis
-    return global_pval, pvalues
+        return  pvalues, cis
+    return pvalues
 
-def generate_data(seed):
+def generate_data(seed, nu):
     rng = np.random.default_rng(seed)    
     y = mu + rng.normal(size=(n,)) * sigma
-    df = pd.DataFrame(X, columns=[f'x{i}' for i in range(p+1)])
-    df['y'] = y 
-    return df
+    y_perturb = nu * rng.normal(size=(n,))
+    return y, y_perturb
 
-def run(seed, n_train, n_val=1000, hidden_dim=8):
-    df = generate_data(seed)
-    selector = PolynomialSelection(df, sigma)
+def run(seed, n_train, n_val=1000, hidden_dim=8, nu_sq=0.):
+    nu = np.sqrt(nu_sq)
+    y, y_perturb = generate_data(seed, nu)
+    selector = PolynomialSelection(X, y, sigma, nu, y_perturb)
     d = selector.selected_deg
     print('selected degree:', d)
     if d < 1:
@@ -92,20 +87,15 @@ def run(seed, n_train, n_val=1000, hidden_dim=8):
     beta_target = (np.linalg.pinv(X[:, :d+1]) @ mu)[1:]
     beta_hat = selector.beta_hat
     Sigma = selector.Sigma
-    beta_sd = np.sqrt(np.diag(Sigma))
 
     sig_level = 0.05
-    q = norm.ppf(sig_level / 2)
-    lower = beta_hat + q * beta_sd
-    upper = beta_hat - q * beta_sd
     
     pvalues_all = {}
     intervals_all = {}
-    global_pvalues_all = {}
-    intervals_all['naive'] = np.stack([lower, upper]).T
-    pvalues_all['naive'] = 2 * norm.cdf(-np.abs(beta_hat) / beta_sd)
-    naive_zvalue = np.linalg.cholesky(np.linalg.inv(Sigma)).T @ beta_hat
-    global_pvalues_all['naive'] = 1 - chi2.cdf(np.sum(naive_zvalue**2), df=d)
+
+    pvalues_all['naive'], intervals_all['naive'] = selector.naive_inference(sig_level=sig_level)
+    if nu > 0:
+        pvalues_all['splitting'], intervals_all['splitting'] = selector.splitting_inference(sig_level=sig_level)
 
     print("Generating samples ...")
     rng = np.random.default_rng(0)
@@ -129,12 +119,12 @@ def run(seed, n_train, n_val=1000, hidden_dim=8):
         model, params, val_losses = train_with_validation(train_samples, train_contexts, val_samples, val_contexts, learning_rate=1e-4, max_iter=10000, checkpoint_every=1000, hidden_dims=[hidden_dim], n_layers=12, num_bins=20, seed=seed)
         val_losses = np.array(val_losses)
         
-        global_pval, pvals, cis = inference(model, params, beta_hat, Sigma, mean_shift, cov_chol, compute_ci=True, sig_level=sig_level)
-        return global_pval, pvals, cis, val_losses
+        pvals, cis = inference(model, params, beta_hat, Sigma, mean_shift, cov_chol, compute_ci=True, sig_level=sig_level)
+        return pvals, cis, val_losses
     
     for _seed in range(10):
         print("Training seed: ", _seed)
-        global_pvalues_all['nf'], pvalues_all['nf'] , intervals_all['nf'], val_losses = train_and_inference(seed=_seed)
+        pvalues_all['nf'] , intervals_all['nf'], val_losses = train_and_inference(seed=_seed)
         if (not np.isnan(pvalues_all['nf']).any()) and (not np.isinf(intervals_all['nf']).any()):
             break
 
@@ -144,7 +134,7 @@ def run(seed, n_train, n_val=1000, hidden_dim=8):
     print(coverages_all)
     print(pvalues_all)
 
-    return {'coverages': coverages_all, 'pvalues': pvalues_all, 'intervals': intervals_all, 'global_pvalues': global_pvalues_all, 'losses': val_losses}
+    return {'coverages': coverages_all, 'pvalues': pvalues_all, 'intervals': intervals_all, 'losses': val_losses}
         
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -157,6 +147,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_val', type=int, default=1000)
     parser.add_argument('--max_iter', type=int, default=1000)
     parser.add_argument('--hidden_dim', type=int, default=8)
+    parser.add_argument('--nu_sq', type=float, default=0.)
     parser.add_argument('--rootdir', type=str, default='experiments/results')
     args = parser.parse_args()
 
@@ -176,11 +167,11 @@ if __name__ == "__main__":
     snr = np.sqrt(np.var(mu) / sigma**2)
 
     seed = args.seed
-    results = run(seed, n_train=args.n_train, n_val=args.n_val, hidden_dim=args.hidden_dim)
+    results = run(seed, n_train=args.n_train, n_val=args.n_val, hidden_dim=args.hidden_dim, nu_sq=args.nu_sq)
     if results is not None:
         savepath = os.path.join(args.rootdir, args.date, 'poly')
 
-        prefix = f'poly_{n}_{p}_signal_{args.signal_fac}_train_{args.n_train}_val_{args.n_val}_hidden_{args.hidden_dim}'
+        prefix = f'poly_{n}_{p}_signal_{args.signal_fac}_nusq_{args.nu_sq}_train_{args.n_train}_val_{args.n_val}_hidden_{args.hidden_dim}'
         path = os.path.join(savepath, prefix)
         os.makedirs(path, exist_ok=True)
         filename = os.path.join(path, f'{seed}.pkl')
