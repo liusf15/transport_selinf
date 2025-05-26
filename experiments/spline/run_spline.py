@@ -20,9 +20,10 @@ def run(seed, n_train, n_val, n_fold=5, nu_sq=0.):
 
     selector = SplineSelection(x, y, sigma, n_fold=n_fold, scale=True, nu=nu, y_perturb=y_perturb)
     d = selector.d
-    naive_pval = selector.naive_F_test()
+    pvalues_all = {}
+    pvalues_all['naive'] = selector.naive_F_test()
     if nu > 0:
-        splitting_pval = selector.splitting_F_test()
+        pvalues_all['splitting'] = selector.splitting_F_test()
 
     print("Generating samples ...")
     rng = np.random.default_rng(0)
@@ -64,20 +65,20 @@ def run(seed, n_train, n_val, n_fold=5, nu_sq=0.):
         learning_rate = 1e-5
         for _seed in range(3, 6):
             print("Training seed: ", _seed, "lr: ", learning_rate)
-            pval, val_losses = train_and_inference(seed=_seed, max_iter=10000, learning_rate=learning_rate, hidden_dims=hidden_dims)
-            if np.isnan(val_losses[-1]) or (val_losses[-1] - val_losses[0] > 1e4) or (np.isnan(pval)):
-                print("Training failed", pval)
+            pval_nf, val_losses = train_and_inference(seed=_seed, max_iter=10000, learning_rate=learning_rate, hidden_dims=hidden_dims)
+            if np.isnan(val_losses[-1]) or (val_losses[-1] - val_losses[0] > 1e4) or (np.isnan(pval_nf)):
+                print("Training failed", pval_nf)
                 continue
             else:
-                print("Training succeeded", pval)
+                print("Training succeeded", pval_nf)
                 flag = True
                 break
     
     if not flag:
         print("Training failed, setting pvalue to 2")
-        pval = 2.
+        pval_nf = 2.
 
-    pvalues_all = {'naive': naive_pval, 'splitting': splitting_pval, 'adjusted': pval}
+    pvalues_all['nf'] = pval_nf
     print(pvalues_all)
     return pvalues_all
 
