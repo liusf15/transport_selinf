@@ -52,8 +52,8 @@ def run(seed, n_train, n_val, n_fold=5, nu_sq=0.):
     flag = False
     for _seed in range(3):
         print("Training seed: ", _seed, "lr: ", learning_rate)
-        pval, val_losses = train_and_inference(seed=_seed, max_iter=10000, learning_rate=learning_rate, hidden_dims=hidden_dims)
-        if np.isnan(val_losses[-1]) or (val_losses[-1] - val_losses[0] > 1e4) or (np.isnan(pval)):
+        pval_nf, val_losses = train_and_inference(seed=_seed, max_iter=10000, learning_rate=learning_rate, hidden_dims=hidden_dims)
+        if np.isnan(val_losses[-1]) or (val_losses[-1] - val_losses[0] > 1e4) or (np.isnan(pval_nf)):
             print("Training failed")
             continue
         else:
