@@ -1,0 +1,35 @@
+---
+title: "pbmc preprocessing"
+output: html_document
+date: "2025-05-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(Seurat)
+setwd("/Users/sliu/Simons Foundation Dropbox/Sifan Liu/pbmc")
+```
+
+```{r}
+pbmc.data = Read10X_h5("5k_Human_Donor1_PBMC_3p_gem-x_5k_Human_Donor1_PBMC_3p_gem-x_count_sample_filtered_feature_bc_matrix.h5")
+print(dim(pbmc.data))
+```
+
+Adapted from https://satijalab.org/seurat/articles/pbmc3k_tutorial. 
+
+```{r}
+pbmc <- CreateSeuratObject(counts = pbmc.data, min.cells = 3, min.features = 200)
+pbmc[["percent.mt"]] <- PercentageFeatureSet(pbmc, pattern = "^MT-")
+pbmc <- subset(pbmc, subset = nFeature_RNA > 200 & nFeature_RNA < 5000 & percent.mt < 5)
+pbmc <- NormalizeData(pbmc)
+print(dim(pbmc))
+pbmc  <- FindVariableFeatures(pbmc, selection.method = "vst", nfeatures = 2000)
+all.genes <- rownames(pbmc)
+pbmc <- ScaleData(pbmc,features = all.genes)
+all_var_genes <- VariableFeatures(pbmc)
+X_preproc <- GetAssayData(pbmc, slot="scale.data")[all_var_genes,]
+print(dim(X_preproc))
+```
+```{r}
+write.csv(t(X_preproc), "filtered_gene_expression.csv", row.names = TRUE)
+```
