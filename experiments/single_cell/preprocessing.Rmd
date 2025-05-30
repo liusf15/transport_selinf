@@ -1,13 +1,11 @@
 ---
 title: "pbmc preprocessing"
 output: html_document
-date: "2025-05-29"
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(Seurat)
-setwd("/Users/sliu/Simons Foundation Dropbox/Sifan Liu/pbmc")
 ```
 
 ```{r}
