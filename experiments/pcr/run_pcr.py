@@ -134,7 +134,7 @@ def run(seed, rho, n_train, n_val, n_fold=5):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--date', type=str, default='20250409')
+    parser.add_argument('--date', type=str, default='2025')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--rho', type=float, default=.9)
     parser.add_argument('--n_train', type=int, default=2000)

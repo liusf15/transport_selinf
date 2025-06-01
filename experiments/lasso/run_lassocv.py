@@ -35,7 +35,6 @@ def run(seed, p, s, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, save
     pvalues_all['naive'], intervals_all['naive'] = rl.naive_inference(sig_level=sig_level)
 
     if nu > 0:
-        # y_indep = y - w_y * (sigma**2 / nu**2)
         pvalues_all['splitting'], intervals_all['splitting'] = rl.splitting_inference(sig_level=sig_level)
 
     def neg_loglik(beta_hat, beta_null):
@@ -117,7 +116,7 @@ def run(seed, p, s, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, save
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='cv rlasso')
-    parser.add_argument('--date', type=str, default='20250221')
+    parser.add_argument('--date', type=str, default='2025')
     parser.add_argument('--p', type=int, default=20)
     parser.add_argument('--s', type=int, default=5)
     parser.add_argument('--seed', type=int, default=0)

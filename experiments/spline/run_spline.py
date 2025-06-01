@@ -84,7 +84,7 @@ def run(seed, n_train, n_val, n_fold=5, nu_sq=0.):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--date', type=str, default='20250403')
+    parser.add_argument('--date', type=str, default='2025')
     parser.add_argument('--n', type=int, default=100)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--signal_fac', type=float, default=1.)
