@@ -48,22 +48,9 @@ class RandomLasso(Selector):
         self.A2_obs = self.KX @ self.y_perturb
 
     def solve_lasso(self, y, y_perturb, lbd=None):
-        # if lbd is None:
-        #     l1_norm = rr.weighted_l1norm([self.lbd] * self.p, lagrange=1.)
-        # else:
-        #     l1_norm = rr.weighted_l1norm([lbd] * self.p, lagrange=1.)
-        # quad = rr.identity_quadratic(coef=0, center=0, linear_term=self.w)
-        # loglike = rr.glm.gaussian(self.X, y, coef=1)
-        # problem = rr.simple_problem(loglike, l1_norm)
-        # solve_args={'tol': 1.e-12, 'min_its': 50}
-        # beta_sol = problem.solve(quadratic=quad, **solve_args)
-        # return beta_sol
-        # debug
         if lbd is None:
             lbd = self.lbd
         return Lasso(alpha=lbd/self.n, fit_intercept=False).fit(self.X, y - y_perturb).coef_
-        # assert np.allclose(beta_sol, beta_sol2), f"beta_sol: {beta_sol}, beta_sol2: {beta_sol2}"
-        # return beta_sol
 
     def select_prob_hard_threshold(self, beta_hat, _):
         Sigma_ = np.linalg.inv(self.X_E.T @ self.X_E)
