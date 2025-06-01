@@ -28,20 +28,6 @@ def train(model, params, samples, contexts, learning_rate=0.01, max_iter=500):
     return params, losses
 
 
-def train_nf(samples, contexts, learning_rate, max_iter, hidden_dims=[32, 32], n_layers=8, num_bins=20):
-    d = samples.shape[1]
-    if d == 1:
-        model = OneDSplineFlow(context_dim=1, hidden_dims=hidden_dims, num_bins=num_bins)
-        params = model.init(jax.random.key(0), jnp.ones((1, )), context=jnp.ones((1, 1)))
-        samples = samples.flatten()
-    else:
-        model = RealNVP(dim=d, n_layers=n_layers, hidden_dims=hidden_dims)
-        params = model.init(jax.random.key(0), jnp.ones((1, d)), context=jnp.ones((1, d)))
-
-    params, losses = train(model, params, samples, contexts, learning_rate=learning_rate, max_iter=max_iter)
-    return model, params, losses
-
-
 def train_with_validation(train_samples, train_contexts, val_samples, val_contexts, learning_rate, max_iter=5000, checkpoint_every=1000, hidden_dims=[8], n_layers=12, num_bins=20, seed=0):
 
     d = train_samples.shape[1]
