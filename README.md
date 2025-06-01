@@ -1,9 +1,9 @@
 # transport_selinf
 
-Code for reproducing the experiments in ``Flexible Selective Inference with Flow-based Transport Maps'', 2025.
+Code for reproducing the experiments in *Flexible Selective Inference with Flow-based Transport Maps*, 2025.
 
 
-To reproduce the simulations from Section 6.1 to 6.4, run the following with varying random seeds.
+To reproduce the simulations from Section 6.1 to 6.4, run the following with varying random seeds and arguments.
 
 ```
 python -m experiments.polynomial.regression.run_poly_selection --seed 0
