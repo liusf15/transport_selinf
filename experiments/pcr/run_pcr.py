@@ -94,7 +94,9 @@ def run(seed, rho, n_train, n_val, n_fold=5):
 
     print("Generating samples ...")
     rng = np.random.default_rng(0)
-    train_samples, train_contexts = selector.generate_training_data(rng, n_train+n_val, max_try=100)
+    train_samples, train_contexts, num_tries = selector.generate_training_data(rng, n_train+n_val, max_try=100, return_num_tries=True)
+    np.savetxt(f'pcr_num_tries_{seed}.txt', num_tries, fmt='%d')
+    print("Average number of tries:", np.mean(num_tries))
     print("Generated", train_samples.shape[0], 'samples')
 
     if train_samples.shape[0] == 0:
