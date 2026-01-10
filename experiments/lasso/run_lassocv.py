@@ -51,7 +51,7 @@ def run(seed, p, s, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, save
 
     print("Generating samples ...")
     train_samples, train_contexts, num_tries = rl.generate_training_data(rng, n_train+n_val, resample_scale=1., max_try=100, return_num_tries=True)
-    np.savetxt(f'lassocv_num_tries_{seed}.txt', num_tries, fmt='%d')
+    # np.savetxt(f'lassocv_num_tries_{seed}.txt', num_tries, fmt='%d')
     print("Average number of tries:", np.mean(num_tries))
     print("Generated", train_samples.shape[0], 'samples')
 

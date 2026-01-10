@@ -268,7 +268,7 @@ class RandomLassoCV(RandomLasso):
         super().__init__(X, y, sigma, lbd=self.lbd, nu=self.nu, y_perturb=y_perturb)
 
     def select_lambda(self, y):
-        lasso_cv = LassoCV(alphas=self.alphas, fit_intercept=False, n_jobs=-1, cv=self.nfold, random_state=0)
+        lasso_cv = LassoCV(alphas=self.alphas, fit_intercept=False, n_jobs=-1, cv=self.nfold, random_state=0, tol=1e-2)
         lasso_cv.fit(self.X, y)
         return lasso_cv.alpha_ 
 
