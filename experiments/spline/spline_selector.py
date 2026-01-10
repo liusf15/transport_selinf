@@ -73,18 +73,28 @@ class SplineSelection(Selector):
         _, F_pval, _ = alt_model.compare_f_test(null_model)
         return F_pval
 
-    def sample_from_global_null(self, rng, n_train):
+    def sample_from_global_null(self, rng, n_train, return_num_tries=False):
         beta_null = np.zeros(self.d)
         def _generator(seed):
             _rng = np.random.default_rng(seed)
-            X = self.resample(_rng, beta_null, num_samples=1, max_try=100)
-            if len(X) > 0:
-                return X[0]
-            return None
+            if not return_num_tries:
+                X = self.resample(_rng, beta_null, num_samples=1, max_try=100)
+                if len(X) > 0:
+                    return X[0]
+                return None
+            else:
+                X, num_tries = self.resample(_rng, beta_null, num_samples=1, max_try=100, return_num_tries=True)
+                if len(X) > 0:
+                    return X[0], num_tries
+                return None, num_tries
 
         seeds = rng.integers(low=0, high=2**32 - 1, size=n_train)
         samples = Parallel(n_jobs=-1)(
                 delayed(_generator)(seed)
                 for seed in tqdm(seeds)
             )
-        return np.array([r for r in samples if r is not None])
+        if not return_num_tries:
+            return np.array([r for r in samples if r is not None])
+        else:
+            return samples, np.array([r[1] for r in samples if r[0] is not None])
+        

@@ -27,7 +27,9 @@ def run(seed, n_train, n_val, n_fold=5, nu_sq=0.):
 
     print("Generating samples ...")
     rng = np.random.default_rng(0)
-    train_samples = selector.sample_from_global_null(rng, n_train+n_val)
+    train_samples, num_tries = selector.sample_from_global_null(rng, n_train+n_val, return_num_tries=True)
+    np.savetxt(f'spline_num_tries_{seed}.txt', num_tries, fmt='%d')
+    print("Average number of tries:", np.mean(num_tries))
     print("Sample size", train_samples.shape[0])
 
     if train_samples.shape[0] == 0:
