@@ -99,7 +99,9 @@ def run(seed, n_train, n_val=1000, hidden_dim=8, nu_sq=0.):
 
     print("Generating samples ...")
     rng = np.random.default_rng(0)
-    train_samples, train_contexts = selector.generate_training_data(rng, n_train+n_val, max_try=100)
+    train_samples, train_contexts, num_tries = selector.generate_training_data(rng, n_train+n_val, max_try=100, return_num_tries=True)
+    print("Average number of tries:", np.mean(num_tries))
+    np.savetxt(f'poly_num_tries_{seed}.txt', num_tries, fmt='%d')
     print("Generated", train_samples.shape[0], 'samples')
 
     if train_samples.shape[0] == 0:
