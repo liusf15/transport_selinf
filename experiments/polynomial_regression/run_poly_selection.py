@@ -75,10 +75,10 @@ def generate_data(seed, nu):
     y_perturb = nu * rng.normal(size=(n,))
     return y, y_perturb
 
-def run(seed, n_train, n_val=1000, hidden_dim=8, nu_sq=0.):
+def run(seed, n_train, n_val=1000, hidden_dim=8, nu_sq=0., condition_on_A=False):
     nu = np.sqrt(nu_sq)
     y, y_perturb = generate_data(seed, nu)
-    selector = PolynomialSelection(X, y, sigma, nu, y_perturb)
+    selector = PolynomialSelection(X, y, sigma, nu, y_perturb, condition_on_A=condition_on_A)
     d = selector.selected_deg
     print('selected degree:', d)
     if d < 1:
@@ -101,7 +101,7 @@ def run(seed, n_train, n_val=1000, hidden_dim=8, nu_sq=0.):
     rng = np.random.default_rng(0)
     train_samples, train_contexts, num_tries = selector.generate_training_data(rng, n_train+n_val, max_try=100, return_num_tries=True)
     print("Average number of tries:", np.mean(num_tries))
-    np.savetxt(f'poly_num_tries_{seed}.txt', num_tries, fmt='%d')
+    # np.savetxt(f'poly_num_tries_{seed}.txt', num_tries, fmt='%d')
     print("Generated", train_samples.shape[0], 'samples')
 
     if train_samples.shape[0] == 0:
@@ -150,6 +150,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_iter', type=int, default=1000)
     parser.add_argument('--hidden_dim', type=int, default=8)
     parser.add_argument('--nu_sq', type=float, default=0.)
+    parser.add_argument('--condition_on_A', default=False, action='store_true')
     parser.add_argument('--rootdir', type=str, default='experiments/results')
     args = parser.parse_args()
 
@@ -169,7 +170,7 @@ if __name__ == "__main__":
     snr = np.sqrt(np.var(mu) / sigma**2)
 
     seed = args.seed
-    results = run(seed, n_train=args.n_train, n_val=args.n_val, hidden_dim=args.hidden_dim, nu_sq=args.nu_sq)
+    results = run(seed, n_train=args.n_train, n_val=args.n_val, hidden_dim=args.hidden_dim, nu_sq=args.nu_sq, condition_on_A=args.condition_on_A)
     if results is not None:
         savepath = os.path.join(args.rootdir, args.date, 'poly')
 

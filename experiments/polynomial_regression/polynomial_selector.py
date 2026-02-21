@@ -6,7 +6,7 @@ from scipy.special import ndtr, ndtri
 from experiments.selector import Selector
 
 class PolynomialSelection(Selector):
-    def __init__(self, X, y, sigma, nu=0, y_perturb=None):
+    def __init__(self, X, y, sigma, nu=0, y_perturb=None, condition_on_A=False):
         self.X = X
         self.df_X = pd.DataFrame(X, columns=[f'x{i}' for i in range(X.shape[1])])
         self.y = y
@@ -22,10 +22,19 @@ class PolynomialSelection(Selector):
         self.selected_deg, self.selected_model = self.select(y + self.y_perturb)
         self.d = self.selected_deg
         self.X_E = X[:, :self.selected_deg+1]
+        self.X_Ec = X[:, self.selected_deg+1:]
         self.beta_hat = np.array(self.selected_model.params.iloc[1:])
         self.Sigma = np.linalg.inv(self.X_E.T @ self.X_E) * sigma**2
         self.Sigma = self.Sigma[1:, 1:]
         self.Sigma_sqrt = np.linalg.cholesky(self.Sigma)
+
+        self.condition_on_A = condition_on_A
+        self.K_E = np.zeros((self.p - self.d, self.p + 1))
+        self.K_E[:, :self.selected_deg+1] = (self.X_Ec.T @ self.X_E) @ np.linalg.inv(self.X_E.T @ self.X_E)
+        self.K_E[:, self.selected_deg+1:] = -np.eye(self.p - self.d)
+        self.KX = self.K_E @ X.T
+        self.proj_y = self.KX.T @ np.linalg.inv(self.KX @ self.KX.T)
+        self.A1_obs = self.KX @ y
     
     def select(self, y):
         df = self.df_X.copy()
@@ -45,6 +54,9 @@ class PolynomialSelection(Selector):
 
     def _resample(self, rng, beta_null):
         y = self.X_E[:, 1:] @ beta_null + rng.normal(size=(self.n, )) * self.sigma
+        if self.condition_on_A:
+            y = y - self.proj_y @ (self.KX @ y - self.A1_obs)
+
         y_perturb = rng.normal(size=(self.n, )) * self.nu
         selected_deg, selected_model = self.select(y + y_perturb)
         if selected_deg == self.selected_deg:
