@@ -18,7 +18,7 @@ class RandomLasso(Selector):
         self.X = X
         self.y = y
         self.n, self.p = X.shape
-        self.sigma = sigma
+        
         self.lbd = lbd
 
         self.nu = nu
@@ -35,6 +35,12 @@ class RandomLasso(Selector):
         self.E = E
         self.d = E.sum()
         self.X_E = X[:, E]
+        if sigma is not None:
+            self.sigma = sigma
+        else:
+            resid = y - self.X_E @ np.linalg.inv(self.X_E.T @ self.X_E) @ self.X_E.T @ y
+            sigma = np.sum(resid**2) / (self.n - self.d)
+            self.sigma = sigma
         self.Sigma = sigma**2 * np.linalg.inv(self.X_E.T @ self.X_E)       
         self.Sigma_sqrt = np.linalg.cholesky(self.Sigma) 
         self.beta_hat = np.linalg.pinv(self.X_E) @ self.y

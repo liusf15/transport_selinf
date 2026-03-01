@@ -9,7 +9,7 @@ from experiments.lasso.randomized_lasso import RandomLassoCV
 from experiments.lasso.regression_designs import gaussian_instance
 from flows.train import train_with_validation
 
-def run(seed, p, s, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, savepath=None):
+def run(seed, p, s, signal_fac, nu, rho, nfold, ngrid, n_train, estimate_sigma=False, n_val=1000, hidden_dim=8, savepath=None):
     n = 100
     sigma = 1.
     signal = np.sqrt(signal_fac * 2 * np.log(p))
@@ -19,8 +19,11 @@ def run(seed, p, s, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, save
     X, y, beta = gaussian_instance(rng, n, p, s, sigma, rho, signal, random_signs=random_signs, scale=True, center=True, equicorrelated=equi)
     y_perturb = nu * rng.normal(size=(n,))
 
-    alphas = np.logspace(-2, np.log10(5), 10) * np.sqrt(np.log(p)) / n
-    rl = RandomLassoCV(X, y, sigma, alphas, nfold=10, nu=nu, y_perturb=y_perturb)
+    alphas = np.logspace(-2, np.log10(5), ngrid) * np.sqrt(np.log(p)) / n
+    if estimate_sigma:
+        rl = RandomLassoCV(X, y, None, alphas, nfold=nfold, nu=nu, y_perturb=y_perturb)
+    else:
+        rl = RandomLassoCV(X, y, sigma, alphas, nfold=nfold, nu=nu, y_perturb=y_perturb)
     d = rl.d
     print("selected", d, "variables")
     if d == 0:
@@ -108,7 +111,10 @@ def run(seed, p, s, signal_fac, nu, rho, n_train, n_val=1000, hidden_dim=8, save
     
     results_all = {'pvalues': pvalues_all, 'intervals': intervals_all, 'false_rejects': false_rejects_all, 'coverages': coverages_all}
     if savepath is not None:
-        prefix = f'lassocv_{n}_{p}_{s}_{round(nu, 3)}_{signal_fac}_rho_{rho}_train_{n_train}_val_{n_val}_hidden_{hidden_dim}'
+        if estimate_sigma:
+            prefix = f'lassocv_sigmahat_{n}_{p}_{s}_{round(nu, 3)}_{signal_fac}_rho_{rho}_nfold_{nfold}_ngrid_{ngrid}_train_{n_train}_val_{n_val}_hidden_{hidden_dim}'
+        else:
+            prefix = f'lassocv_{n}_{p}_{s}_{round(nu, 3)}_{signal_fac}_rho_{rho}_nfold_{nfold}_ngrid_{ngrid}_train_{n_train}_val_{n_val}_hidden_{hidden_dim}'
         path = os.path.join(savepath, prefix)
         os.makedirs(path, exist_ok=True)
         filename = os.path.join(path, f'{seed}.pkl')
@@ -125,6 +131,9 @@ if __name__ == '__main__':
     parser.add_argument('--signal_fac', type=float, default=.6)
     parser.add_argument('--nu_sq', type=float, default=.1)
     parser.add_argument('--rho', type=float, default=.5)
+    parser.add_argument('--nfold', type=int, default=10)
+    parser.add_argument('--ngrid', type=int, default=10)
+    parser.add_argument('--estimate_sigma', default=False, action='store_true')
     parser.add_argument('--n_train', type=int, default=2000)
     parser.add_argument('--n_val', type=int, default=1000)
     parser.add_argument('--max_iter', type=int, default=3000)
@@ -135,4 +144,4 @@ if __name__ == '__main__':
 
     savepath = os.path.join(args.rootdir, args.date, 'lassocv')
     nu = np.sqrt(args.nu_sq)
-    run(p=args.p, s=args.s, seed=args.seed, signal_fac=args.signal_fac, nu=nu, rho=args.rho, n_train=args.n_train, n_val=args.n_val, hidden_dim=args.hidden_dim, savepath=savepath)
+    run(p=args.p, s=args.s, seed=args.seed, signal_fac=args.signal_fac, nu=nu, rho=args.rho, nfold=args.nfold, ngrid=args.ngrid, n_train=args.n_train, estimate_sigma=args.estimate_sigma, n_val=args.n_val, hidden_dim=args.hidden_dim, savepath=savepath)
