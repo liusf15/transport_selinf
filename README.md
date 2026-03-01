@@ -1,6 +1,6 @@
 # transport_selinf
 
-Code for reproducing the experiments in *Flexible Selective Inference with Flow-based Transport Maps*, 2025.
+Code for reproducing the experiments in *Flexible Selective Inference with Flow-based Transport Maps*, 2025. [https://arxiv.org/pdf/2506.01150](https://arxiv.org/pdf/2506.01150)
 
 
 To reproduce the simulations from Section 6.2 to 6.5, run the following with varying random seeds and arguments.
