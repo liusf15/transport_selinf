@@ -6,7 +6,10 @@ from scipy.special import ndtr, ndtri
 from experiments.selector import Selector
 
 class PolynomialSelection(Selector):
+    # Select polynomial degree by sequential ANOVA and replay that event.
     def __init__(self, X, y, sigma, nu=0, y_perturb=None, condition_on_A=False):
+        # X includes an intercept; y/sigma define the response model; nu and
+        # y_perturb randomize selection; condition_on_A fixes nuisance contrasts.
         self.X = X
         self.df_X = pd.DataFrame(X, columns=[f'x{i}' for i in range(X.shape[1])])
         self.y = y
@@ -19,6 +22,7 @@ class PolynomialSelection(Selector):
         else:
             self.y_perturb = y_perturb
 
+        # Select on the randomized response and retain non-intercept coefficients.
         self.selected_deg, self.selected_model = self.select(y + self.y_perturb)
         self.d = self.selected_deg
         self.X_E = X[:, :self.selected_deg+1]
@@ -29,14 +33,16 @@ class PolynomialSelection(Selector):
         self.Sigma_sqrt = np.linalg.cholesky(self.Sigma)
 
         self.condition_on_A = condition_on_A
+        # Build omitted-term contrasts for optional ancillary conditioning.
         self.K_E = np.zeros((self.p - self.d, self.p + 1))
         self.K_E[:, :self.selected_deg+1] = (self.X_Ec.T @ self.X_E) @ np.linalg.inv(self.X_E.T @ self.X_E)
         self.K_E[:, self.selected_deg+1:] = -np.eye(self.p - self.d)
         self.KX = self.K_E @ X.T
         self.proj_y = self.KX.T @ np.linalg.inv(self.KX @ self.KX.T)
         self.A1_obs = self.KX @ y
-    
+
     def select(self, y):
+        # Fit all nested degrees to y and stop before the first nonsignificant term.
         df = self.df_X.copy()
         df['y'] = y 
         models = {}
@@ -53,6 +59,7 @@ class PolynomialSelection(Selector):
         return selected_deg, models[selected_deg]
 
     def _resample(self, rng, beta_null):
+        # Simulate at beta_null and accept only responses selecting the same degree.
         y = self.X_E[:, 1:] @ beta_null + rng.normal(size=(self.n, )) * self.sigma
         if self.condition_on_A:
             y = y - self.proj_y @ (self.KX @ y - self.A1_obs)
@@ -65,6 +72,7 @@ class PolynomialSelection(Selector):
             return None
 
     def naive_inference(self, sig_level=0.05, beta=None):
+        # Test beta, or zero by default, using unadjusted selected-model normal theory.
         sd = np.sqrt(np.diag(self.Sigma))
         q = ndtri(sig_level / 2)
         lower = self.beta_hat + q * sd
@@ -76,6 +84,7 @@ class PolynomialSelection(Selector):
         return pvals, np.stack([lower, upper]).T
     
     def splitting_inference(self, sig_level=0.05, beta=None):
+        # Form inference from the response component independent of selection.
         y_indep = self.y - self.y_perturb * (self.sigma**2 / self.nu**2)
         beta_hat_indep = (np.linalg.pinv(self.X_E) @ y_indep)[1:]
         Sigma_indep = self.Sigma * (1 + self.sigma**2 / self.nu**2)
@@ -88,4 +97,3 @@ class PolynomialSelection(Selector):
         else:
             pvals = 2 * ndtr(-abs((beta_hat_indep - beta) / sd))
         return pvals, np.stack([lower, upper]).T
-    

@@ -19,10 +19,14 @@ from utils.utils import ci_bisection
 n, p = 100, 50
 
 def inference(model, params, suff_stat, sd_suff_stat, beta_hat, sd_beta, mean_shift, cov_chol, sig_level=0.05, compute_ci=False):
+    # model/params define the learned law; suff_stat and beta_hat are score/target
+    # estimates with their scales; affine terms prewhiten the score; remaining
+    # arguments set test level and whether to invert tests for intervals.
     d = len(suff_stat)
     pvalues = np.zeros(d)
     cis = np.zeros((d, 2))
 
+    # Use direct normal inversion in one dimension and likelihood grids otherwise.
     if d == 1:
         suff_stat_center = cov_chol.T @ (suff_stat - mean_shift)
         def get_pvalue(beta_null):
@@ -34,6 +38,7 @@ def inference(model, params, suff_stat, sd_suff_stat, beta_hat, sd_beta, mean_sh
             cis[0] = ci_bisection(get_pvalue, sd_beta[0], beta_hat[0] + 5 * sd_beta[0], beta_hat[0] - 5 * sd_beta[0], sig_level=sig_level, tol=1e-4)
     else:
         suff_stat_center = cov_chol.T @ (suff_stat - mean_shift)
+        # The joint whitened radius supplies the global selected-model test.
         z_value = model.apply(params, suff_stat_center, context=jnp.zeros(d), method=model.inverse)[0]
         global_pval = 1 - chi2.cdf(np.sum(z_value**2), df=d)
 
@@ -77,13 +82,17 @@ def inference(model, params, suff_stat, sd_suff_stat, beta_hat, sd_beta, mean_sh
 
 
 def generate_data(seed, rho):
+    # seed indexes the replication and rho controls AR(1) feature correlation.
     rng = np.random.default_rng(seed)
     X = rng.multivariate_normal(mean=np.zeros(p), cov=rho ** np.abs(np.subtract.outer(np.arange(p), np.arange(p))), size=n)
     y = rng.binomial(1, 0.5, size=n)
     return X, y
 
 def run(seed, rho, n_train, n_val, n_fold=5):
+    # Training/validation counts allocate conditional draws; n_fold is retained
+    # for a consistent experiment interface.
     X, y = generate_data(seed, rho)
+    # Standardize features, rotate to PCs, and normalize score directions.
     preprocess_pipeline = Pipeline([
             ('scale', StandardScaler()),
             ('pca', PCA()),
@@ -105,6 +114,7 @@ def run(seed, rho, n_train, n_val, n_fold=5):
     global_pvalues_all = {}
     intervals_all['naive'], pvalues_all['naive'], global_pvalues_all['naive'] = selector.naive_inference(sig_level)
 
+    # Simulate statistics conditional on reselecting the observed PC dimension.
     print("Generating samples ...")
     rng = np.random.default_rng(0)
     train_samples, train_contexts, num_tries = selector.generate_training_data(rng, n_train+n_val, max_try=100, return_num_tries=True)
@@ -116,6 +126,7 @@ def run(seed, rho, n_train, n_val, n_fold=5):
         print("Failed to generate training data")
         return
 
+    # Prewhiten conditional scores before splitting training and validation data.
     mean_shift = np.mean(train_samples, axis=0)
     cov_chol = np.linalg.cholesky(np.linalg.inv(np.atleast_2d(np.cov(train_samples.T))))
     samples_center = (train_samples - mean_shift) @ cov_chol
@@ -131,11 +142,13 @@ def run(seed, rho, n_train, n_val, n_fold=5):
     sd_beta = np.sqrt(np.diag(selector.Sigma))
 
     def train_and_inference(seed):
+        # seed initializes the flow and the returned losses diagnose fit stability.
         model, params, val_losses = train_with_validation(train_samples, train_contexts, val_samples, val_contexts, learning_rate=1e-4, max_iter=10000, checkpoint_every=1000, hidden_dims=[8], n_layers=12, num_bins=20, seed=seed)
         val_losses = np.array(val_losses)
         global_pval, pvalues, cis = inference(model, params, suff_stat, sd_suff_stat, beta_hat, sd_beta, mean_shift, cov_chol, sig_level, compute_ci=True)
         return global_pval, pvalues, cis, val_losses
     
+    # Retry initializations until all reported inferential quantities are finite.
     for _seed in range(10):
         print("Training seed: ", _seed)
         global_pvalues_all['nf'], pvalues_all['nf'] , intervals_all['nf'], val_losses = train_and_inference(seed=_seed)
@@ -148,6 +161,7 @@ def run(seed, rho, n_train, n_val, n_fold=5):
     return {'global_pvalue': global_pvalues_all, 'pvalues': pvalues_all, 'intervals': intervals_all}
 
 if __name__ == "__main__":
+    # Run and persist one PCR simulation replication.
     parser = argparse.ArgumentParser()
     parser.add_argument('--date', type=str, default='2025')
     parser.add_argument('--seed', type=int, default=0)

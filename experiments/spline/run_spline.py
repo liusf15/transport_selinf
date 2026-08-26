@@ -9,15 +9,19 @@ from experiments.spline.spline_selector import SplineSelection
 from flows.train import train_with_validation
 
 def generate_data(seed, nu):
+    # seed indexes the replication; nu is the selection-randomization scale.
     rng = np.random.default_rng(seed)    
     y = mu + rng.normal(size=(n,)) * sigma
     y_perturb = rng.normal(size=(n,)) * nu
     return y, y_perturb
 
 def run(seed, n_train, n_val, n_fold=5, nu_sq=0.):
+    # Training counts split conditional draws; n_fold controls spline selection;
+    # nu_sq is the randomization variance used by selection and data splitting.
     nu = np.sqrt(nu_sq)
     y, y_perturb = generate_data(seed, nu)
 
+    # Select the spline and compute the classical comparison p-values.
     selector = SplineSelection(x, y, sigma, n_fold=n_fold, scale=True, nu=nu, y_perturb=y_perturb)
     d = selector.d
     pvalues_all = {}
@@ -25,6 +29,7 @@ def run(seed, n_train, n_val, n_fold=5, nu_sq=0.):
     if nu > 0:
         pvalues_all['splitting'] = selector.splitting_F_test()
 
+    # Draw the global-null law conditional on the observed selected knot count.
     print("Generating samples ...")
     rng = np.random.default_rng(0)
     train_samples, num_tries = selector.sample_from_global_null(rng, n_train+n_val, return_num_tries=True)
@@ -36,12 +41,14 @@ def run(seed, n_train, n_val, n_fold=5, nu_sq=0.):
         print("Failed to generate training data")
         return
 
+    # Center and linearly whiten samples before fitting the nonlinear transport.
     mean_shift = np.mean(train_samples, axis=0)
     cov_chol = np.linalg.cholesky(np.linalg.inv(np.atleast_2d(np.cov(train_samples.T))))
     samples_center = (train_samples - mean_shift) @ cov_chol
     beta_hat_center = cov_chol.T @ (selector.beta_hat - mean_shift)
 
     def train_and_inference(seed, max_iter, learning_rate, hidden_dims):
+        # seed initializes the flow; optimizer/architecture arguments control fitting.
         model, params, val_losses = train_with_validation(samples_center[:n_train], None, samples_center[n_train:], None, learning_rate=learning_rate, max_iter=max_iter, checkpoint_every=1000, hidden_dims=hidden_dims, n_layers=12, num_bins=20, seed=seed)
         z_value = model.apply(params, beta_hat_center, context=None, method=model.inverse)[0]
         pval = chi2.sf(np.sum(z_value**2), df=d)
@@ -49,6 +56,7 @@ def run(seed, n_train, n_val, n_fold=5, nu_sq=0.):
             return np.nan, val_losses
         return pval, val_losses
     
+    # Retry unstable fits, then fall back to a smaller learning rate.
     learning_rate = 1e-4
     hidden_dims = [8]
     flag = False
@@ -85,6 +93,7 @@ def run(seed, n_train, n_val, n_fold=5, nu_sq=0.):
     return pvalues_all
 
 if __name__ == "__main__":
+    # Parse one replication and construct the fixed spline signal design.
     parser = argparse.ArgumentParser()
     parser.add_argument('--date', type=str, default='2025')
     parser.add_argument('--n', type=int, default=100)
@@ -112,6 +121,7 @@ if __name__ == "__main__":
 
     seed = args.seed
     results = run(args.seed, n_train=args.n_train, n_val=args.n_val, n_fold=args.n_fold, nu_sq=args.nu_sq)
+    # Persist one row per replication for later aggregation.
     if results is not None:
         savepath = os.path.join(args.rootdir, args.date, 'spline')
         prefix = f'spline_{n}_signal_{args.signal_fac}_nusq_{args.nu_sq}_train_{args.n_train}_val_{args.n_val}_maxknots_{args.max_knots}_cv_{args.n_fold}'

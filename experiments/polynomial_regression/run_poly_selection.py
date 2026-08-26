@@ -14,11 +14,15 @@ from utils.utils import ci_bisection
 
 
 def inference(model, params, beta_hat, Sigma, mean_shift, cov_chol, sig_level=0.05, compute_ci=False):
+    # model/params define the learned conditional law; beta_hat/Sigma describe
+    # the selected target; affine terms prewhiten it; the final arguments control
+    # test level and optional confidence-interval inversion.
     d = len(beta_hat)
     beta_sd = np.sqrt(np.diag(Sigma))
     pvalues = np.zeros(d)
     cis = np.zeros((d, 2))
 
+    # Invert the scalar map directly, or integrate coordinatewise conditional laws.
     if d == 1:
         beta_hat_center = cov_chol.T @ (beta_hat - mean_shift)
         def get_pvalue(beta_null):
@@ -34,6 +38,7 @@ def inference(model, params, beta_hat, Sigma, mean_shift, cov_chol, sig_level=0.
             beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
             return model.apply(params, beta_hat_center_, beta_null, method=model.forward_kl)
         
+        # Hold the Gaussian projection orthogonal to each tested coordinate fixed.
         for j in range(d):
             eta = np.eye(d)[j]
             c = Sigma @ eta / (np.dot(eta, Sigma @ eta))
@@ -70,12 +75,15 @@ def inference(model, params, beta_hat, Sigma, mean_shift, cov_chol, sig_level=0.
     return pvalues
 
 def generate_data(seed, nu):
+    # seed indexes the replication and nu scales selection randomization.
     rng = np.random.default_rng(seed)    
     y = mu + rng.normal(size=(n,)) * sigma
     y_perturb = nu * rng.normal(size=(n,))
     return y, y_perturb
 
 def run(seed, n_train, n_val=1000, hidden_dim=8, nu_sq=0., condition_on_A=False):
+    # Training counts allocate conditional draws; hidden_dim configures the flow;
+    # nu_sq controls randomization and condition_on_A selects ancillary conditioning.
     nu = np.sqrt(nu_sq)
     y, y_perturb = generate_data(seed, nu)
     selector = PolynomialSelection(X, y, sigma, nu, y_perturb, condition_on_A=condition_on_A)
@@ -84,6 +92,7 @@ def run(seed, n_train, n_val=1000, hidden_dim=8, nu_sq=0., condition_on_A=False)
     if d < 1:
         return
     
+    # Project the generating mean onto the selected polynomial-model target.
     beta_target = (np.linalg.pinv(X[:, :d+1]) @ mu)[1:]
     beta_hat = selector.beta_hat
     Sigma = selector.Sigma
@@ -97,6 +106,7 @@ def run(seed, n_train, n_val=1000, hidden_dim=8, nu_sq=0., condition_on_A=False)
     if nu > 0:
         pvalues_all['splitting'], intervals_all['splitting'] = selector.splitting_inference(sig_level=sig_level)
 
+    # Generate selected statistics paired with their simulated null parameters.
     print("Generating samples ...")
     rng = np.random.default_rng(0)
     train_samples, train_contexts, num_tries = selector.generate_training_data(rng, n_train+n_val, max_try=100, return_num_tries=True)
@@ -108,6 +118,7 @@ def run(seed, n_train, n_val=1000, hidden_dim=8, nu_sq=0., condition_on_A=False)
         print("Failed to generate training data")
         return
     
+    # Prewhiten conditional draws and split them without losing context alignment.
     mean_shift = np.mean(train_samples, axis=0)
     cov_chol = np.linalg.cholesky(np.linalg.inv(np.atleast_2d(np.cov(train_samples.T))))
     samples_center = (train_samples - mean_shift) @ cov_chol
@@ -118,18 +129,21 @@ def run(seed, n_train, n_val=1000, hidden_dim=8, nu_sq=0., condition_on_A=False)
     train_contexts = train_contexts[:n_train]
 
     def train_and_inference(seed):
+        # seed initializes one flow fit; losses are returned for diagnostics.
         model, params, val_losses = train_with_validation(train_samples, train_contexts, val_samples, val_contexts, learning_rate=1e-4, max_iter=10000, checkpoint_every=1000, hidden_dims=[hidden_dim], n_layers=12, num_bins=20, seed=seed)
         val_losses = np.array(val_losses)
         
         pvals, cis = inference(model, params, beta_hat, Sigma, mean_shift, cov_chol, compute_ci=True, sig_level=sig_level)
         return pvals, cis, val_losses
     
+    # Retry initializations until p-values and interval endpoints are finite.
     for _seed in range(10):
         print("Training seed: ", _seed)
         pvalues_all['nf'] , intervals_all['nf'], val_losses = train_and_inference(seed=_seed)
         if (not np.isnan(pvalues_all['nf']).any()) and (not np.isinf(intervals_all['nf']).any()):
             break
 
+    # Compare every interval method with the selected-model target coefficients.
     coverages_all = {}
     for key, ci in intervals_all.items():
         coverages_all[key] = (ci[:, 0] <= beta_target) & (beta_target <= ci[:, 1])
@@ -139,6 +153,7 @@ def run(seed, n_train, n_val=1000, hidden_dim=8, nu_sq=0., condition_on_A=False)
     return {'coverages': coverages_all, 'pvalues': pvalues_all, 'intervals': intervals_all, 'losses': val_losses}
         
 if __name__ == "__main__":
+    # Build the fixed polynomial design and run one requested replication.
     parser = argparse.ArgumentParser()
     parser.add_argument('--date', type=str, default='2025')
     parser.add_argument('--n', type=int, default=50)
@@ -171,6 +186,7 @@ if __name__ == "__main__":
 
     seed = args.seed
     results = run(seed, n_train=args.n_train, n_val=args.n_val, hidden_dim=args.hidden_dim, nu_sq=args.nu_sq, condition_on_A=args.condition_on_A)
+    # Persist the replication under a configuration-specific directory.
     if results is not None:
         savepath = os.path.join(args.rootdir, args.date, 'poly')
 
@@ -181,4 +197,3 @@ if __name__ == "__main__":
         with open(filename, 'wb') as f:
             pickle.dump(results, f)
         print(f'Saved to {filename}')
-

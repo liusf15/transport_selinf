@@ -1,6 +1,7 @@
 import numpy as np
 
 def _design(p, rho, equicorrelated):
+    # p is the feature count; rho controls either common or AR(1) correlation.
     if equicorrelated:
         Sigma = rho * np.ones([p, p]) + (1 - rho) * np.eye(p)
     else:
@@ -18,13 +19,17 @@ def gaussian_instance(rng,
                       scale=True,
                       center=True,
                       equicorrelated=True):
-
+    # n and p set the design shape; s is the number of nonzero coefficients.
+    # signal sets their magnitude/range, while sigma scales signal and noise.
+    # The remaining flags control signs and column preprocessing.
+    # Correlate initially independent Gaussian design columns.
     chol = _design(p, rho, equicorrelated)
     X = rng.standard_normal((n, p)).dot(chol.T)
 
     if center:
         X -= X.mean(0, keepdims=True)
 
+    # Populate the active coefficients before randomly assigning feature labels.
     beta = np.zeros(p) 
     signal = np.atleast_1d(signal)
     if signal.shape == (1,):
@@ -36,6 +41,7 @@ def gaussian_instance(rng,
     rng.shuffle(beta)
     beta /= np.sqrt(n)
 
+    # Normalize columns to unit Euclidean scale for comparable lasso penalties.
     if scale:
         scaling = X.std(0) * np.sqrt(n)
         X /= scaling[None, :]
@@ -43,5 +49,6 @@ def gaussian_instance(rng,
 
     noise = rng.standard_normal(n)
     
+    # Apply sigma last so the returned coefficients match the response scale.
     Y = (X.dot(beta) + noise) * sigma
     return X, Y, beta * sigma

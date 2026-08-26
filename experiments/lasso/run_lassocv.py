@@ -10,6 +10,9 @@ from experiments.lasso.regression_designs import gaussian_instance
 from flows.train import train_with_validation
 
 def run(seed, p, s, signal_fac, nu, rho, nfold, ngrid, n_train, estimate_sigma=False, n_val=1000, hidden_dim=8, savepath=None):
+    # seed identifies a replication; p/s/rho/signal_fac define the Gaussian design.
+    # nu controls randomization; CV/grid and train/validation arguments control
+    # selection and flow fitting; savepath optionally persists the result.
     n = 100
     sigma = 1.
     signal = np.sqrt(signal_fac * 2 * np.log(p))
@@ -19,6 +22,7 @@ def run(seed, p, s, signal_fac, nu, rho, nfold, ngrid, n_train, estimate_sigma=F
     X, y, beta = gaussian_instance(rng, n, p, s, sigma, rho, signal, random_signs=random_signs, scale=True, center=True, equicorrelated=equi)
     y_perturb = nu * rng.normal(size=(n,))
 
+    # Select the penalty and active model, optionally estimating response variance.
     alphas = np.logspace(-2, np.log10(5), ngrid) * np.sqrt(np.log(p)) / n
     if estimate_sigma:
         rl = RandomLassoCV(X, y, None, alphas, nfold=nfold, nu=nu, y_perturb=y_perturb)
@@ -33,6 +37,7 @@ def run(seed, p, s, signal_fac, nu, rho, nfold, ngrid, n_train, estimate_sigma=F
     intervals_all = {}
     pvalues_all = {}
 
+    # Project the generating mean onto the selected-model coefficient target.
     beta_target = np.linalg.pinv(rl.X_E) @ X @ beta
 
     pvalues_all['naive'], intervals_all['naive'] = rl.naive_inference(sig_level=sig_level)
@@ -43,7 +48,7 @@ def run(seed, p, s, signal_fac, nu, rho, nfold, ngrid, n_train, estimate_sigma=F
     def neg_loglik(beta_hat, beta_null):
         return -mvn.logpdf(beta_hat, mean=beta_null, cov=rl.Sigma)
     
-    # unadjusted
+    # Evaluate analytic selection adjustments before learning the conditional law.
     if nu > 0:
         methods = ['hard_threshold', 'bivnormal', 'sov']
     else:
@@ -52,6 +57,7 @@ def run(seed, p, s, signal_fac, nu, rho, nfold, ngrid, n_train, estimate_sigma=F
         print(method)
         pvalues_all[method], intervals_all[method] = rl.adjusted_inference(neg_loglik, method_sel_prob=method, compute_ci=True, sig_level=sig_level)
 
+    # Generate paired conditional statistics and null contexts for flow training.
     print("Generating samples ...")
     train_samples, train_contexts, num_tries = rl.generate_training_data(rng, n_train+n_val, resample_scale=1., max_try=100, return_num_tries=True)
     # np.savetxt(f'lassocv_num_tries_{seed}.txt', num_tries, fmt='%d')
@@ -62,6 +68,7 @@ def run(seed, p, s, signal_fac, nu, rho, nfold, ngrid, n_train, estimate_sigma=F
         print("Failed to generate training data")
         return
     
+    # Prewhiten statistics and preserve the same transform for observed inference.
     mean_shift = np.mean(train_samples, axis=0)
     cov_chol = np.linalg.cholesky(np.linalg.inv(np.atleast_2d(np.cov(train_samples.T))))
     samples_center = (train_samples - mean_shift) @ cov_chol
@@ -72,6 +79,7 @@ def run(seed, p, s, signal_fac, nu, rho, nfold, ngrid, n_train, estimate_sigma=F
     train_contexts = train_contexts[:n_train]
 
     def train():
+        # Retry flow initializations until adjusted p-values and intervals are finite.
         for _seed in range(10):
             model, params, val_losses = train_with_validation(train_samples, train_contexts, val_samples, val_contexts, learning_rate=1e-4, max_iter=10000, checkpoint_every=1000, hidden_dims=[hidden_dim], n_layers=12, num_bins=20, seed=_seed)
             val_losses = np.array(val_losses)
@@ -94,6 +102,7 @@ def run(seed, p, s, signal_fac, nu, rho, nfold, ngrid, n_train, estimate_sigma=F
         beta_hat_center_ = cov_chol.T @ (beta_hat - mean_shift)
         return model.apply(params, beta_hat_center_, beta_null, method=model.forward_kl)
     
+    # Combine the learned likelihood with each available selection-probability method.
     for method in methods:
         print("adjusted", method)
         pvalues_all['adjusted_' + method], intervals_all['adjusted_' + method] = rl.adjusted_inference(neg_loglik_adjusted, method_sel_prob=method, compute_ci=True, sig_level=sig_level)
@@ -101,6 +110,7 @@ def run(seed, p, s, signal_fac, nu, rho, nfold, ngrid, n_train, estimate_sigma=F
     print(pvalues_all)
     print(intervals_all)
 
+    # Convert p-values and intervals into replication-level operating characteristics.
     false_rejects_all = {}
     coverages_all = {}
     for key, item in pvalues_all.items():
@@ -123,6 +133,7 @@ def run(seed, p, s, signal_fac, nu, rho, nfold, ngrid, n_train, estimate_sigma=F
         print(f'Saved to {filename}')
 
 if __name__ == '__main__':
+    # Parse one simulation configuration and write its result under a stable prefix.
     parser = argparse.ArgumentParser(description='cv rlasso')
     parser.add_argument('--date', type=str, default='2025')
     parser.add_argument('--p', type=int, default=20)

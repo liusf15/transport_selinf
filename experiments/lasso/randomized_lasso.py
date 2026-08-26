@@ -14,7 +14,10 @@ from utils.utils import ci_bisection
 from experiments.selector import Selector
 
 class RandomLasso(Selector):
+    # Represent a fixed randomized-lasso active set and its selective law.
     def __init__(self, X, y, sigma, lbd, nu=0., y_perturb=None) -> None:
+        # X/y are observed data; sigma is known or estimated noise scale; lbd is
+        # the lasso penalty; nu/y_perturb specify selection randomization.
         self.X = X
         self.y = y
         self.n, self.p = X.shape
@@ -29,6 +32,7 @@ class RandomLasso(Selector):
             self.y_perturb = y_perturb
             self.w = X.T @ y_perturb
 
+        # Freeze the observed active set and coefficient signs as the selection event.
         self.beta_sol = self.solve_lasso(y, self.y_perturb, self.lbd)
         E = abs(self.beta_sol) > 1e-10
         self.s_E = np.sign(self.beta_sol[E])
@@ -45,6 +49,7 @@ class RandomLasso(Selector):
         self.Sigma_sqrt = np.linalg.cholesky(self.Sigma) 
         self.beta_hat = np.linalg.pinv(self.X_E) @ self.y
 
+        # Build inactive KKT contrasts used to condition resampled responses.
         self.K_E = np.zeros((self.p - self.d, self.p))
         self.K_E[:, E] = (self.X[:, np.logical_not(E)].T @ self.X[:, E]) @ np.linalg.inv(self.X[:, E].T @ self.X[:, E])
         self.K_E[:, np.logical_not(E)] = -np.eye(self.p - self.d)
@@ -54,11 +59,13 @@ class RandomLasso(Selector):
         self.A2_obs = self.KX @ self.y_perturb
 
     def solve_lasso(self, y, y_perturb, lbd=None):
+        # Fit y minus randomization at lbd, defaulting to the observed penalty.
         if lbd is None:
             lbd = self.lbd
         return Lasso(alpha=lbd/self.n, fit_intercept=False).fit(self.X, y - y_perturb).coef_
 
     def select_prob_hard_threshold(self, beta_hat, _):
+        # Return indicators that candidate estimates preserve observed active signs.
         Sigma_ = np.linalg.inv(self.X_E.T @ self.X_E)
         scaled_s = self.s_E * (self.lbd * Sigma_ @ self.s_E)
         scaled_w = self.s_E * (Sigma_ @ self.w[self.E])
@@ -66,6 +73,7 @@ class RandomLasso(Selector):
         return np.all((beta_hat - scaled_s - scaled_w) * self.s_E > 0, axis=1) * 1.
 
     def select_prob_bivnormal(self, beta_hat, j):
+        # Integrate selection probability over randomization along coordinate j.
         Sigma_ = np.linalg.inv(self.X_E.T @ self.X_E)
         scaled_s = self.s_E * (self.lbd * Sigma_ @ self.s_E)
         scaled_w = self.s_E * (Sigma_ @ self.w[self.E])
@@ -84,8 +92,9 @@ class RandomLasso(Selector):
             lb, ub = self.get_hard_threshold(-c, -(b - w_perp))
             sel_probs[i] = norm.cdf(ub / np.sqrt(w_var_j)) - norm.cdf(lb / np.sqrt(w_var_j))
         return sel_probs
-    
+
     def select_prob_sov(self, beta_hat, _):
+        # Approximate multivariate selection probabilities by separation of variables.
         Sigma_ = np.linalg.inv(self.X_E.T @ self.X_E)
         scaled_s = self.s_E * (self.lbd * Sigma_ @ self.s_E)
         D = np.diag(self.s_E)
@@ -102,6 +111,8 @@ class RandomLasso(Selector):
         return sel_probs
 
     def mle_inference(self, w, target='selected', sig_level=0.05):
+        # w is the realized score perturbation; target chooses selected/full effects;
+        # sig_level determines the selective interval coverage.
         feature_weights_ = np.ones(self.p) * self.lbd
         selector = lasso.gaussian(self.X, self.y, feature_weights_, sigma=self.sigma, ridge_term=0.)
         signs = selector.fit(perturb=-w)
@@ -120,6 +131,7 @@ class RandomLasso(Selector):
         return result
 
     def naive_inference(self, sig_level=0.05, beta=None):
+        # Form unadjusted Gaussian intervals and test beta, or zero when omitted.
         sd = np.sqrt(np.diag(self.Sigma))
         q = ndtri(sig_level / 2)
         lower = self.beta_hat + q * sd
@@ -131,6 +143,7 @@ class RandomLasso(Selector):
         return pvals, np.stack([lower, upper]).T
     
     def splitting_inference(self, sig_level=0.05, beta=None):
+        # Use the response component independent of randomized model selection.
         y_indep = self.y + self.y_perturb * (self.sigma**2 / self.nu**2)
         beta_hat_indep = np.linalg.pinv(self.X_E) @ y_indep
         Sigma_indep = self.Sigma * (1 + self.sigma**2 / self.nu**2)
@@ -146,6 +159,7 @@ class RandomLasso(Selector):
     
     def get_hard_threshold(self, a, b):
         """
+        # a and b encode simultaneous scalar inequalities for the same x.
         get intervals x \in [lb, ub] that corresponds to a * x - b > 0
         """
         zero_idx = a == 0
@@ -164,12 +178,15 @@ class RandomLasso(Selector):
         return lb, ub
 
     def adjusted_inference(self, neg_loglik, method_sel_prob, compute_ci=False, sig_level=0.05):
+        # neg_loglik scores candidate estimates/nulls; method_sel_prob chooses the
+        # selection adjustment; compute_ci and sig_level control interval inversion.
         d = self.d
         Sigma = self.Sigma
         beta_sd = np.sqrt(np.diag(Sigma))
         beta_hat = self.beta_hat
         cis = np.zeros((d, 2))
         pvalues = np.zeros(d)
+        # Condition on each target coordinate and numerically integrate its tail law.
         if method_sel_prob == 'hard_threshold':
             for j in range(d):
                 eta = np.eye(d)[j]
@@ -203,6 +220,7 @@ class RandomLasso(Selector):
                     if np.isnan(_offset):
                         return 0.
                     
+                    # Normalize the conditional density on the feasible interval.
                     grid = np.linspace(lb_finite, ub_finite, 200)
                     logp = jax.vmap(logp_j, in_axes=(0, None))(grid, beta_null_j)
                     logp = jnp.nan_to_num(logp, nan=-np.inf)
@@ -224,6 +242,7 @@ class RandomLasso(Selector):
                 sd_j = np.sqrt(Sigma[j, j])
                 grid = jnp.linspace(-10, 10, 200) * sd_j + beta_hat[j]
                 grids = np.outer(grid, c) + beta_perp
+                # Weight the likelihood grid by the chosen randomized-selection law.
                 if method_sel_prob == 'sov':
                     select_prob = self.select_prob_sov(grids, j)
                 elif method_sel_prob == 'bivnormal':
@@ -256,7 +275,9 @@ class RandomLasso(Selector):
         return pvalues
 
 class RandomLassoCV(RandomLasso):
+    # Extend fixed-penalty inference to condition on cross-validated penalty choice.
     def __init__(self, X, y, sigma, alphas, nfold=10, nu=0., y_perturb=None):
+        # alphas is the candidate grid and nfold controls cross-validation.
         self.X = X
         self.y = y
         self.n, self.p = X.shape
@@ -274,11 +295,14 @@ class RandomLassoCV(RandomLasso):
         super().__init__(X, y, sigma, lbd=self.lbd, nu=self.nu, y_perturb=y_perturb)
 
     def select_lambda(self, y):
+        # Reproduce the observed cross-validation rule on response y.
         lasso_cv = LassoCV(alphas=self.alphas, fit_intercept=False, n_jobs=-1, cv=self.nfold, random_state=0, tol=1e-2)
         lasso_cv.fit(self.X, y)
         return lasso_cv.alpha_ 
 
     def _resample(self, rng, beta_null):
+        # Simulate at beta_null while preserving inactive KKT contrasts, then
+        # accept only draws that reproduce the cross-validated penalty.
         y = self.X_E @ beta_null + rng.normal(size=(self.n, )) * self.sigma
         y = y - self.proj_y @ (self.KX @ y - self.A1_obs)
 
@@ -290,4 +314,3 @@ class RandomLassoCV(RandomLasso):
             return np.linalg.pinv(self.X_E) @ y
         else:
             return None
-    
