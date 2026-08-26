@@ -58,46 +58,6 @@ done
 
 Apply the same seed range to the other runners. The `--seed` argument controls the simulated-data replication; fixed design and flow-training seeds are set separately in the experiment code.
 
-## Spline power comparison
-
-The standalone power experiment compares three tests using the same knot-conditioned null samples:
-
-- the proposed transport-map test;
-- the empirical raw L2-norm test;
-- an empirical covariance-whitened L2-norm test.
-
-First, calibrate one transport map for each possible selected knot count:
-
-```bash
-python -m experiments.spline.train_power_transports \
-  --n_train 2000 --n_val 500
-```
-
-The command prints the map directory. Use that directory for all signal levels
-and seeds; the upper seed endpoint is exclusive:
-
-```bash
-MAP_DIR="experiments/results/spline_power_maps/<configuration>"
-
-for signal in 0 0.25 0.5 0.75 1; do
-  python -m experiments.spline.run_power_comparison \
-    --map_dir "$MAP_DIR" \
-    --signal_fac "$signal" \
-    --seeds 0 500
-done
-```
-
-Finally, summarize the replications and generate the power figure:
-
-```bash
-RESULTS_DIR="experiments/results/spline_power_pretrained/<configuration>"
-
-python -m experiments.spline.summarize_power_comparison \
-  --results_dir "$RESULTS_DIR"
-```
-
-The summarizer verifies seed coverage and successful runs before writing a CSV
-summary and PDF figure. Use `--allow_incomplete` only for interim diagnostics.
 
 ## Figures and tables
 
