@@ -20,6 +20,8 @@ from sampling.cython_core import sample_sov, Gibbs, joint_cdf_bivnormal, st_cdf
 MACHINE_EPS = np.finfo(np.float64).eps
 
 def gibson_ordering(Sigma, a, b):
+    # Sigma is the Gaussian covariance; a/b are truncation bounds. Reorder
+    # coordinates greedily to reduce separation-of-variables variance.
     d = len(a)
     orders = []
     num_ = 0
@@ -35,7 +37,7 @@ def gibson_ordering(Sigma, a, b):
         uppers = (b - num_) / np.sqrt(den_)
         exp_len = ndtr(uppers) - ndtr(lowers)
         new_j = np.argmin(exp_len[j:]) + j
-        # swap
+        # Move the tightest remaining conditional interval into position j.
         Sigma[:, [j, new_j]] = Sigma[:, [new_j, j]]
         Sigma[[j, new_j], :] = Sigma[[new_j, j], :]
         L[:, [j, new_j]] = L[:, [new_j, j]]
@@ -58,7 +60,8 @@ def sample_sov_reorder(mean, L, nsample, seed):
     sample x ~ N(mean, L @ L') | x_j > 0 \forall 1\leq j\leq d
     U: (n, d) or (n, d-1)
     """
-    # reorder variables
+    # mean/L define the Gaussian; nsample and seed control weighted simulation.
+    # Reorder variables before calling the low-level SOV sampler.
     d = len(mean)
     b = np.ones(d) * np.Inf
     with warnings.catch_warnings():
@@ -75,6 +78,7 @@ def sample_sov_reorder(mean, L, nsample, seed):
     return samples, weights
 
 def upper_bound(l, u, L):
+    # Optimize an exponential-tilting upper bound for bounds l/u and Cholesky L.
     d_ = len(l)
     def psi(xmu, l, u, L):
         x = xmu[:d_]
@@ -96,6 +100,8 @@ def upper_bound(l, u, L):
     return upper_bound
 
 def upper_bound_numerator(mean, L, c1, c2, initial=None, verbose=False):
+    # Bound a soft-truncation numerator for Gaussian mean/Cholesky and probit
+    # contrast c1'x+c2; initial seeds optimization and verbose reports failure.
     c1_t = L.T @ c1
     c2_t = c2 + agnp.dot(c1, mean)
     l = -mean
@@ -133,6 +139,7 @@ def upper_bound_numerator(mean, L, c1, c2, initial=None, verbose=False):
     return upper_bound
 
 def lower_bound(l, u, L, verbose=False):
+    # Fit a diagonal truncated-normal approximation to lower-bound box probability.
     d_ = len(l)
     Sigma = L @ L.T
     Sigma_inv = agnp.linalg.inv(Sigma)
@@ -175,10 +182,13 @@ def lower_bound(l, u, L, verbose=False):
     return lower_bound
 
 def trunc_norm_1d(u, mu, sigma, a, b):
+    # Map uniform u through the inverse CDF of N(mu, sigma^2) truncated to [a, b].
     z = norm.ppf(norm.cdf((a - mu) / sigma) + (norm.cdf((b - mu) / sigma) - norm.cdf((a - mu) / sigma)) * u)
     return mu + sigma * z
 
 def ci_bisection(get_pvalue, sd, right, left, sig_level=0.05, tol=1e-6):
+    # Invert get_pvalue; sd sets search increments, right/left seed endpoint
+    # searches, and sig_level/tol set the target and numerical accuracy.
     incre = sd / 5
     ## right end
     pval_t = get_pvalue(right)
@@ -272,6 +282,7 @@ def sample_trunc_normal(m, Sigma, seed=1, nsample=512):
     """"
     sample u from the distribution N(m, Sigma) conditioned on u > 0
     """
+    # m/Sigma define the Gaussian and seed/nsample control weighted SOV draws.
     L = np.linalg.cholesky(Sigma)
     upper = np.inf * np.ones_like(m)
     samples, weights = sample_sov(-m, upper, L, nsample, seed, spherical=0)

@@ -14,6 +14,7 @@ ctypedef np.intp_t DTYPE_intp_t
 cdef double MACHINE_EPS = np.finfo(float).eps
 cdef double PI = np.pi
 
+# Generate weighted samples from a box-truncated Gaussian by sequential inversion.
 @cython.boundscheck(False)
 @cython.cdivision(False)
 def sample_sov(np.ndarray[DTYPE_float_t, ndim=1] a, 
@@ -66,7 +67,7 @@ def sample_sov(np.ndarray[DTYPE_float_t, ndim=1] a,
 
     cdef int d = len(a)
 
-    # generate uniform samples by scrambled Sobol sequence
+    # rqmc selects scrambled Sobol points; otherwise use pseudorandom uniforms.
     cdef np.ndarray[DTYPE_float_t, ndim=2] U = np.empty((n, d), float)
     if rqmc == 1:
         soboleng = qmc.Sobol(d, scramble=True, seed=seed)
@@ -86,6 +87,7 @@ def sample_sov(np.ndarray[DTYPE_float_t, ndim=1] a,
     cdef Py_ssize_t k, j, i
     cdef double aj_, bj_, tmp, w, lo, hi, factor
 
+    # Sample each conditional truncated coordinate and multiply proposal weights.
     for k in range(n):
         u = U[k]
         w = 1.
@@ -131,6 +133,7 @@ def joint_cdf_bivnormal(double h,
                         double k, 
                         double rho): 
     """
+    # h/k are marginal cutoffs and rho is their standard-normal correlation.
     Compute the probability of P(x < h, y < k) where x, y are N(0, 1) with correlation rho
     """
     cdef double ph, pk, phk
@@ -210,6 +213,7 @@ def st_cdf(np.ndarray[DTYPE_float_t, ndim=1] mu,
     (so the estimator of the probability is the ratio)
     """
 
+    # rqmc selects quasi-random sampling; debug retains a comparison sequence path.
     cdef int d = len(mu)
     # generate uniform samples by scrambled Sobol sequence
     cdef np.ndarray[DTYPE_float_t, ndim=2] U = np.empty((n, d-1), float)
@@ -244,6 +248,7 @@ def st_cdf(np.ndarray[DTYPE_float_t, ndim=1] mu,
 
     cdef np.ndarray[DTYPE_float_t, ndim=1] a = -mu
 
+    # Integrate the last coordinate analytically after sampling earlier conditionals.
     for k in range(n):
         u = U[k]
         w = 1.
@@ -322,6 +327,7 @@ def Gibbs(np.ndarray[DTYPE_float_t, ndim=1] mu,
     samples: (n, d)
 
     """
+    # Optional PC and eta schedules interleave global directions with coordinate moves.
     cdef int d = len(mu)
     rng = np.random.default_rng(seed) 
     cdef np.ndarray[DTYPE_float_t, ndim=1] usample = rng.random(maxit)
@@ -357,6 +363,7 @@ def Gibbs(np.ndarray[DTYPE_float_t, ndim=1] mu,
     cdef int doeta = 1
     cdef double cond_mean, cond_sigma, lower, upper, lower_u, upper_u, u_, zz
     cdef np.ndarray[DTYPE_float_t, ndim=1] theta
+    # Choose a scheduled direction, derive its feasible interval, and sample it.
     for t in range(maxit):
         docoord = 1
 
@@ -428,4 +435,3 @@ def Gibbs(np.ndarray[DTYPE_float_t, ndim=1] mu,
 
         samples[t] = np.copy(x_t)
     return np.array(samples)
-
