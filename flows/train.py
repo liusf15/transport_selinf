@@ -6,6 +6,8 @@ from flows.realnvp import RealNVP
 from flows.one_dim_flow import OneDSplineFlow
 
 def train(model, params, samples, contexts, learning_rate=0.01, max_iter=500):
+    # model/params define the flow; samples and contexts form the full training
+    # batch; learning_rate and max_iter control Adam optimization.
     optimizer = optax.adam(learning_rate)
     opt_state = optimizer.init(params)
 
@@ -21,6 +23,7 @@ def train(model, params, samples, contexts, learning_rate=0.01, max_iter=500):
         params = optax.apply_updates(params, updates)
         return (params, opt_state), loss
 
+    # Compile all fixed-count gradient steps into one JAX scan.
     init_carry = (params, opt_state)
     carry, losses = jax.lax.scan(train_step, init_carry, None, length=max_iter)
     params, opt_state = carry
@@ -29,7 +32,11 @@ def train(model, params, samples, contexts, learning_rate=0.01, max_iter=500):
 
 
 def train_with_validation(train_samples, train_contexts, val_samples, val_contexts, learning_rate, max_iter=5000, checkpoint_every=1000, hidden_dims=[8], n_layers=12, num_bins=20, seed=0):
+    # Train/validation arrays contain statistics and optional null contexts.
+    # Architecture arguments configure the 1-D spline or multivariate RealNVP;
+    # checkpoint_every controls validation frequency and seed initializes weights.
 
+    # Select a flow family based on the statistic dimension.
     d = train_samples.shape[1]
     if d == 1:
         model = OneDSplineFlow(context_dim=1, hidden_dims=hidden_dims, num_bins=num_bins)
@@ -46,6 +53,7 @@ def train_with_validation(train_samples, train_contexts, val_samples, val_contex
         else:
             params = model.init(jax.random.key(seed), jnp.ones((1, d)), context=None)
 
+    # Optimize likelihood on training data and retain the best validation checkpoint.
     optimizer = optax.adam(learning_rate)
     opt_state = optimizer.init(params)
 
@@ -66,9 +74,11 @@ def train_with_validation(train_samples, train_contexts, val_samples, val_contex
         return (params, opt_state), loss
     
     def train_chunk(params, opt_state):
+        # Run one checkpoint interval without leaving compiled JAX control flow.
         carry, training_losses = jax.lax.scan(train_step, (params, opt_state), None, length=checkpoint_every)
         return carry
 
+    # Evaluate validation loss between chunks for model selection and divergence checks.
     n_chunks = max_iter // checkpoint_every
     val_losses = []
     min_val_loss = float('inf')

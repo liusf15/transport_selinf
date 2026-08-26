@@ -1,5 +1,7 @@
 
 def ci_bisection(get_pvalue, sd, right, left, sig_level=0.05, tol=1e-6):
+    # Invert get_pvalue to form a confidence interval. sd sets the bracketing
+    # step, right/left are initial searches, and tol controls endpoint accuracy.
     incre = sd / 5
     ## right end
     up = None

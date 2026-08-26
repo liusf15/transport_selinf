@@ -3,6 +3,7 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 
 class Selector:
+    # Common interface for selection procedures that can replay their event.
     def __init__(self):
         pass
 
@@ -13,6 +14,8 @@ class Selector:
         raise NotImplementedError
     
     def resample(self, rng, beta_null, num_samples=1, max_try=100, return_num_tries=False):
+        # rng drives each proposal; beta_null is its target mean under the null.
+        # num_samples is the acceptance target and max_try caps proposal attempts.
         samples = []
         count = 0
         for i in range(max_try):
@@ -28,6 +31,8 @@ class Selector:
             return np.array(samples), i + 1
     
     def generate_training_data(self, rng, n_train, resample_scale=1., max_try=100, return_num_tries=False):
+        # Draw null parameters around the observed estimate, then condition each
+        # simulated statistic on reproducing the original selection event.
         d = self.d
         def generator(seed):
             _rng = np.random.default_rng(seed)
@@ -43,12 +48,14 @@ class Selector:
                     return X[0], beta_null, num_tries
                 return None, None, num_tries
     
+        # Independent seeds make the parallel jobs reproducible and isolated.
         seeds = rng.integers(low=0, high=2**32 - 1, size=n_train)
         results = Parallel(n_jobs=-1)(
                 delayed(generator)(seed)
                 for seed in tqdm(seeds)
             )
 
+        # Discard failed proposals while keeping samples and null contexts aligned.
         samples = np.array([r[0] for r in results if r[0] is not None])
         contexts = np.array([r[1] for r in results if r[0] is not None])
         if not return_num_tries:
@@ -56,4 +63,3 @@ class Selector:
         else:
             num_tries = np.array([r[2] for r in results if r[0] is not None])
             return samples, contexts, num_tries
-        

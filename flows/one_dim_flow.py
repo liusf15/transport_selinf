@@ -4,12 +4,14 @@ from typing import Sequence, Callable, Optional
 import distrax
 
 class SplineParamsMLP(nn.Module):
+    # Predict rational-quadratic spline parameters from an optional context.
     hidden_dims: Sequence[int]
     num_bins: int
     activation: Callable = nn.relu
 
     @nn.compact
     def __call__(self, x, context: Optional[jnp.ndarray] = None):
+        # x is the current feature vector; context contains conditioning values.
         if context is not None:
             x = jnp.concatenate([x.unsqueeze(), context.unsqueeze()], axis=-1)
 
@@ -23,6 +25,7 @@ class SplineParamsMLP(nn.Module):
 
 
 class OneDSplineFlow(nn.Module):
+    # One-dimensional conditional transport based on a monotone spline.
     context_dim: int = 0
     hidden_dims: Sequence[int] = 1
     num_bins: int = 10
@@ -30,6 +33,8 @@ class OneDSplineFlow(nn.Module):
     range_max: float = 5.0
 
     def setup(self):
+        # Conditional flows learn parameters through an MLP; unconditional flows
+        # optimize one shared parameter vector directly.
         if self.context_dim > 0:
             self.mlp = SplineParamsMLP(
                 hidden_dims=self.hidden_dims,
@@ -46,6 +51,7 @@ class OneDSplineFlow(nn.Module):
 
     @nn.compact
     def __call__(self, x: jnp.ndarray, context: Optional[jnp.ndarray] = None, inverse: bool = False):
+        # x is a batch of scalars; inverse chooses data-to-base transformation.
         if self.context_dim > 0 and context is not None:
             raw_params = self.mlp(context)
         else:
@@ -54,6 +60,7 @@ class OneDSplineFlow(nn.Module):
                 (x.shape[0], 3 * self.num_bins + 1)
             )
 
+        # Convert unconstrained network outputs into a valid monotone bijection.
         spline = distrax.RationalQuadraticSpline(
             params=raw_params,
             range_min=self.range_min,
@@ -75,6 +82,7 @@ class OneDSplineFlow(nn.Module):
         return self(z, context=context, inverse=True)
 
     def forward_kl(self, y, context=None, base_dist=None):
+        # Evaluate negative log likelihood after mapping observations to the base.
         x, log_det = self.inverse(y, context)
         if base_dist is None:
             base_dist = distrax.Normal(0., 1.)
@@ -82,4 +90,3 @@ class OneDSplineFlow(nn.Module):
         logp = log_q + log_det
         logp = jnp.where(jnp.isinf(logp), jnp.nan, logp)
         return -jnp.nanmean(logp)
-    

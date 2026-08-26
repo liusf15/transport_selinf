@@ -7,6 +7,7 @@ from typing import Sequence, Callable
 inverse_softplus = lambda x: jnp.log(jnp.exp(x) - 1.)
 
 class ConditionerMLP(nn.Module):
+    # Produce a shift and positive-scale logit for every transformed coordinate.
     hidden_dims: Sequence[int]
     output_dim: int
     activation: Callable = nn.relu
@@ -24,11 +25,13 @@ class ConditionerMLP(nn.Module):
 
 
 class RealNVP(nn.Module):
+    # Multivariate transport composed of alternating affine coupling layers.
     dim: int
     n_layers: int
     hidden_dims: Sequence[int]
 
     def setup(self):
+        # Alternating masks ensure every coordinate is transformed across layers.
         self.masks = [
             jnp.array([((i + j) % 2) == 0 for j in range(self.dim)], dtype=bool)
             for i in range(self.n_layers)
@@ -45,21 +48,26 @@ class RealNVP(nn.Module):
 
     @nn.compact
     def __call__(self, x, context=None, inverse=False):
+        # x is the input batch, context conditions each coupling, and inverse
+        # selects the data-to-base direction used for density evaluation.
         logdet = 0.
         for i in range(self.n_layers):
             mask = self.masks[i]
             conditioner_mlp = self.conditioners[i]
             
             def bijector_fn(params) -> distrax.Bijector:
+                # Split conditioner output into stable positive scales and shifts.
                 scale_logit, shift = jnp.split(params, 2, axis=-1)
                 scale = jax.nn.softplus(scale_logit + inverse_softplus(1.))
                 return distrax.ScalarAffine(shift=shift, scale=scale)
             
             def conditioner_fn(x_masked):
+                # Append the null parameter context to the unchanged coordinates.
                 if context is not None:
                     x_masked = jnp.concatenate([x_masked, context], axis=-1)
                 return conditioner_mlp(x_masked)  
             
+            # Apply one masked affine update and accumulate its Jacobian term.
             bij = distrax.MaskedCoupling(
                 mask=mask,
                 conditioner=conditioner_fn,
@@ -81,6 +89,7 @@ class RealNVP(nn.Module):
         return self(y, context, True)
 
     def forward_kl(self, y, context=None, base_dist=None):
+        # Pull y back to a standard-normal base and return mean negative log density.
         x, log_det = self.inverse(y, context)
         if base_dist is None:
             base_dist = distrax.MultivariateNormalDiag(jnp.zeros(self.dim), jnp.ones(self.dim))
